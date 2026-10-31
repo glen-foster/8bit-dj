@@ -175,11 +175,14 @@
   <div class="hud-layer">
     <!-- Left Column (col-span-7): Top Title Bar + Open 8-Bit Stage Window + Bottom Now Playing Card -->
     <section class="col-span-7 flex flex-col justify-between gap-4 min-h-0 min-w-0">
-      <!-- Top Box: Full-Width Stage Title Bar -->
-      <header class="pixel-box-highlight px-4 py-3 flex items-center justify-center min-w-0 shrink-0">
-        <div id="stageTitle" class="text-xs xl:text-base highlight-text truncate text-center w-full min-w-0">
-          STAGE 01: NEON SYNTHWAVE ARENA
+      <!-- Top Box: Full-Width Stage Title & Scrolling RPG Marquee Bar -->
+      <header class="pixel-box-highlight px-4 py-3 flex items-center min-w-0 shrink-0 overflow-hidden">
+        <div class="ticker-wrap w-full min-w-0 text-xs xl:text-sm highlight-text">
+          <div id="flavorTicker" class="ticker-move">
+            *** STAGE 01: NEON SYNTHWAVE ARENA *** WELCOME TO THE 8-BIT JUKEBOX! SCAN THE QR CODE TO VOTE OR DROP TRACKS! ***
+          </div>
         </div>
+        <span id="stageTitle" class="hidden">STAGE 01: NEON SYNTHWAVE ARENA</span>
         <span id="sceneSourceTag" class="hidden">[GEMINI AI]</span>
       </header>
 
