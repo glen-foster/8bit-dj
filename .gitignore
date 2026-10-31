@@ -1,0 +1,23 @@
+# Secrets & local environment
+.env
+
+# Python virtual environment & bytecode
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+
+# Local SQLite database & WAL files
+jukebox.db
+jukebox.db-shm
+jukebox.db-wal
+
+# Audio cache & binaries
+cache/
+cloudflared
+cloudflared.tgz
+
+# macOS / Editor
+.DS_Store
+.vscode/
+.idea/

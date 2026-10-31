@@ -1,0 +1,584 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>8-BIT JUKEBOX // HOST ADMIN CONSOLE</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet" />
+  <style>
+    * {
+      box-sizing: border-box;
+      font-family: 'Press Start 2P', monospace;
+    }
+
+    body {
+      background-color: #090518;
+      color: #ffffff;
+    }
+
+    .host-panel {
+      background: #130b2e;
+      border: 4px solid #00f5d4;
+      box-shadow: 6px 6px 0px #000000;
+    }
+
+    .host-panel-pink {
+      background: #1a0826;
+      border: 4px solid #ff2a85;
+      box-shadow: 6px 6px 0px #000000;
+    }
+
+    .arcade-btn {
+      border: 3px solid #ffffff;
+      box-shadow: 3px 3px 0px #000000;
+    }
+
+    .arcade-btn:active {
+      transform: translate(2px, 2px);
+      box-shadow: 1px 1px 0px #000000;
+    }
+  </style>
+</head>
+<body class="min-h-screen p-4 md:p-8">
+  <!-- PIN Lock Gate -->
+  <div id="pinGateModal" class="fixed inset-0 z-50 bg-[#090518] flex items-center justify-center p-4">
+    <div class="host-panel-pink p-6 md:p-8 max-w-md w-full text-center">
+      <div class="text-sm text-pink-400 mb-2">RESTRICTED AREA</div>
+      <h1 class="text-lg text-white mb-6">HOST ADMIN PIN</h1>
+      <form onsubmit="verifyHostPin(event)" class="space-y-4">
+        <input
+          id="pinInput"
+          type="password"
+          inputmode="numeric"
+          placeholder="ENTER PIN (E.G. 1234)"
+          class="w-full bg-black border-4 border-[#00f5d4] px-4 py-3 text-center text-sm text-white focus:outline-none"
+        />
+        <div id="pinErrorMsg" class="hidden text-[9px] text-red-400">
+          ACCESS DENIED: INVALID HOST PIN!
+        </div>
+        <button
+          type="submit"
+          class="arcade-btn w-full py-3.5 bg-[#00f5d4] text-black text-xs hover:bg-emerald-300"
+        >
+          [ UNLOCK CONSOLE ]
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Main Authenticated Host Console -->
+  <div id="hostDashboard" class="hidden max-w-5xl mx-auto space-y-6">
+    <!-- Top Header -->
+    <header class="host-panel p-4 flex flex-wrap items-center justify-between gap-4">
+      <div>
+        <div class="text-[9px] text-gray-400 mb-1">8-BIT JUKEBOX COMMAND CENTER</div>
+        <h1 class="text-sm md:text-base text-[#00f5d4]">HOST ADMIN DASHBOARD</h1>
+      </div>
+      <div class="flex items-center gap-3">
+        <span id="hostWsStatus" class="px-3 py-1.5 bg-emerald-900/60 border-2 border-emerald-400 text-[9px] text-emerald-300">
+          WS: CONNECTED
+        </span>
+        <button
+          onclick="logoutHost()"
+          class="arcade-btn px-3 py-2 bg-gray-800 text-gray-300 text-[9px]"
+        >
+          LOCK
+        </button>
+      </div>
+    </header>
+
+    <!-- Status Toast -->
+    <div
+      id="hostToast"
+      class="hidden p-3 bg-amber-400 text-black border-4 border-white text-xs text-center"
+    ></div>
+
+    <!-- Row 1: Now Playing + Transport Controls & Emergency 6s Crossfade Veto/Skip -->
+    <section class="host-panel-pink p-5 space-y-4">
+      <div class="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+        <div class="min-w-0 flex-1">
+          <div class="flex items-center gap-2 mb-2">
+            <span class="px-2 py-0.5 bg-pink-600 text-white text-[8px]">NOW PLAYING</span>
+            <span id="hostNowStage" class="text-[9px] text-amber-300 truncate">STAGE 01</span>
+          </div>
+          <div id="hostNowTitle" class="text-sm md:text-base text-white truncate mb-1">
+            LOADING...
+          </div>
+          <div id="hostNowArtist" class="text-[10px] text-gray-300 truncate">
+            PLEASE WAIT
+          </div>
+        </div>
+
+        <button
+          onclick="triggerVetoSkip()"
+          class="arcade-btn px-5 py-3.5 bg-red-600 hover:bg-red-500 text-white text-xs shrink-0 w-full md:w-auto"
+        >
+          VETO / 6S CROSSFADE SKIP &gt;&gt;
+        </button>
+      </div>
+
+      <!-- Deck Transport Controls Bar -->
+      <div class="pt-3 border-t-2 border-pink-900/60 flex flex-wrap items-center justify-between gap-2">
+        <div class="text-[9px] text-gray-400">DECK TRANSPORT CONTROLS:</div>
+        <div class="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+          <button
+            onclick="sendTransportControl('restart_track', 0)"
+            class="arcade-btn px-3 py-2.5 bg-gray-800 hover:bg-gray-700 text-white text-[9px] flex-1 sm:flex-initial"
+          >
+            |&lt;&lt; RESTART
+          </button>
+          <button
+            onclick="sendTransportControl('seek_rw', 15)"
+            class="arcade-btn px-3 py-2.5 bg-[#1b113a] hover:bg-indigo-900 text-[#00f5d4] text-[9px] flex-1 sm:flex-initial"
+          >
+            &lt;&lt; -15S
+          </button>
+          <button
+            onclick="sendTransportControl('toggle_pause', 0)"
+            class="arcade-btn px-4 py-2.5 bg-amber-400 hover:bg-amber-300 text-black text-[9px] flex-1 sm:flex-initial"
+          >
+            PLAY / PAUSE
+          </button>
+          <button
+            onclick="sendTransportControl('seek_ff', 15)"
+            class="arcade-btn px-3 py-2.5 bg-[#1b113a] hover:bg-indigo-900 text-[#00f5d4] text-[9px] flex-1 sm:flex-initial"
+          >
+            +15S &gt;&gt;
+          </button>
+          <button
+            onclick="sendTransportControl('clear_scene_cache', 0)"
+            title="Clear cached AI scenes & regenerate"
+            class="arcade-btn px-3 py-2.5 bg-purple-700 hover:bg-purple-600 text-white text-[9px] flex-1 sm:flex-initial"
+          >
+            REFRESH AI SCENES
+          </button>
+        </div>
+      </div>
+
+      <!-- Big Screen Visualizer / Retro Background Controller -->
+      <div class="pt-3 border-t-2 border-pink-900/60 flex flex-wrap items-center justify-between gap-2">
+        <div class="text-[9px] text-gray-400">BIG SCREEN VISUALIZER:</div>
+        <div id="hostVizButtons" class="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+          <button
+            data-viz="auto"
+            onclick="setHostVizMode('auto', 'AUTO')"
+            class="arcade-btn px-2.5 py-2 bg-cyan-500 text-black text-[8px] flex-1 sm:flex-initial"
+          >
+            AUTO
+          </button>
+          <button
+            data-viz="side_scroller"
+            onclick="setHostVizMode('side_scroller', 'SIDE-SCROLLER')"
+            class="arcade-btn px-2.5 py-2 bg-[#1b113a] text-[#00f5d4] text-[8px] flex-1 sm:flex-initial"
+          >
+            SIDE-SCROLLER
+          </button>
+          <button
+            data-viz="winamp_analyzer"
+            onclick="setHostVizMode('winamp_analyzer', 'WINAMP LED')"
+            class="arcade-btn px-2.5 py-2 bg-[#1b113a] text-[#00f5d4] text-[8px] flex-1 sm:flex-initial"
+          >
+            WINAMP LED
+          </button>
+          <button
+            data-viz="winamp_fire"
+            onclick="setHostVizMode('winamp_fire', 'WINAMP FIRE')"
+            class="arcade-btn px-2.5 py-2 bg-[#1b113a] text-[#00f5d4] text-[8px] flex-1 sm:flex-initial"
+          >
+            WINAMP FIRE
+          </button>
+          <button
+            data-viz="city_cruiser"
+            onclick="setHostVizMode('city_cruiser', 'CITY SKYLINE')"
+            class="arcade-btn px-2.5 py-2 bg-[#1b113a] text-[#00f5d4] text-[8px] flex-1 sm:flex-initial"
+          >
+            CITY SKYLINE
+          </button>
+          <button
+            data-viz="synth_grid"
+            onclick="setHostVizMode('synth_grid', 'SYNTH GRID')"
+            class="arcade-btn px-2.5 py-2 bg-[#1b113a] text-[#00f5d4] text-[8px] flex-1 sm:flex-initial"
+          >
+            SYNTH GRID
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Row 2: Two Columns -> Open Search Approval Queue & Active Queue Management -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <!-- Pending Open Search Requests -->
+      <section class="host-panel p-4 flex flex-col">
+        <div class="flex items-center justify-between border-b-2 border-gray-700 pb-2 mb-4">
+          <h2 class="text-xs text-amber-300">OPEN SEARCH APPROVALS</h2>
+          <span id="pendingCountBadge" class="px-2 py-0.5 bg-amber-400 text-black text-[9px]">0</span>
+        </div>
+        <div id="pendingApprovalList" class="space-y-3 flex-1">
+          <!-- Populated via JS -->
+        </div>
+      </section>
+
+      <!-- Active Voting Queue (with Sort & X Remove option) -->
+      <section class="host-panel p-4 flex flex-col">
+        <div class="flex flex-wrap items-center justify-between border-b-2 border-gray-700 pb-2 mb-4 gap-2">
+          <div class="flex items-center gap-2">
+            <h2 class="text-xs text-[#00f5d4]">ACTIVE QUEUE</h2>
+            <span id="activeQueueCount" class="text-[9px] text-gray-400">(0)</span>
+          </div>
+          <div class="flex items-center gap-1.5">
+            <span class="text-[8px] text-gray-400">SORT:</span>
+            <select
+              id="hostQueueSort"
+              onchange="changeHostQueueSort(this.value)"
+              class="bg-black border-2 border-[#00f5d4] text-[#00f5d4] text-[8px] px-2 py-1 focus:outline-none"
+            >
+              <option value="votes">VOTES (PLAY ORDER)</option>
+              <option value="title">TITLE (A-Z)</option>
+              <option value="artist">ARTIST (A-Z)</option>
+              <option value="dj">DJ NAME (A-Z)</option>
+              <option value="recent">RECENTLY ADDED</option>
+            </select>
+          </div>
+        </div>
+        <div id="hostActiveQueueList" class="space-y-2.5 flex-1">
+          <!-- Populated via JS -->
+        </div>
+      </section>
+    </div>
+
+    <!-- Row 3: Load YouTube Music Seed Playlist ID -->
+    <section class="host-panel p-5">
+      <div class="text-xs text-[#00f5d4] mb-2">SEED PLAYLIST LOADER (YOUTUBE MUSIC)</div>
+      <p class="text-[9px] text-gray-300 leading-relaxed mb-4">
+        LOAD A YOUTUBE MUSIC PLAYLIST ID (E.G. PL...) OR URL TO POPULATE THE AUTO-DJ IDLE POOL &amp; MOBILE FAST-TRACK LIST.
+      </p>
+      <form onsubmit="loadSeedPlaylist(event)" class="flex flex-col sm:flex-row gap-3">
+        <input
+          id="playlistIdInput"
+          type="text"
+          placeholder="YOUTUBE MUSIC PLAYLIST ID OR URL..."
+          class="flex-1 bg-black border-2 border-[#00f5d4] px-3 py-3 text-[10px] text-white focus:outline-none"
+        />
+        <button
+          id="loadPlaylistBtn"
+          type="submit"
+          class="arcade-btn px-5 py-3 bg-[#00f5d4] text-black text-[10px] shrink-0"
+        >
+          LOAD SEED PLAYLIST
+        </button>
+      </form>
+      <div id="seedPoolSummary" class="mt-3 text-[9px] text-gray-400">
+        CURRENT SEED POOL: 8 PRE-VALIDATED TRACKS
+      </div>
+    </section>
+  </div>
+
+  <script>
+    let hostPin = sessionStorage.getItem('jukebox_host_pin') || '';
+    let hostWs = null;
+    let lastHostState = null;
+    let hostSortMode = 'votes';
+
+    function changeHostQueueSort(mode) {
+      hostSortMode = mode;
+      if (lastHostState) renderHostState(lastHostState);
+    }
+
+    function showHostToast(msg) {
+      const el = document.getElementById('hostToast');
+      el.textContent = msg;
+      el.classList.remove('hidden');
+      setTimeout(() => el.classList.add('hidden'), 3200);
+    }
+
+    function escapeHtml(str) {
+      return String(str || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    async function verifyHostPin(e) {
+      if (e) e.preventDefault();
+      const inputPin = document.getElementById('pinInput').value.trim() || hostPin;
+      if (!inputPin) return;
+
+      try {
+        const res = await fetch('/api/host/verify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pin: inputPin })
+        });
+        if (!res.ok) {
+          document.getElementById('pinErrorMsg').classList.remove('hidden');
+          sessionStorage.removeItem('jukebox_host_pin');
+          return;
+        }
+        const data = await res.json();
+        hostPin = inputPin;
+        sessionStorage.setItem('jukebox_host_pin', hostPin);
+        document.getElementById('pinErrorMsg').classList.add('hidden');
+        document.getElementById('pinGateModal').classList.add('hidden');
+        document.getElementById('hostDashboard').classList.remove('hidden');
+        renderHostState(data.state);
+        connectHostWS();
+      } catch (err) {
+        document.getElementById('pinErrorMsg').classList.remove('hidden');
+      }
+    }
+
+    function logoutHost() {
+      sessionStorage.removeItem('jukebox_host_pin');
+      hostPin = '';
+      if (hostWs) hostWs.close();
+      document.getElementById('pinInput').value = '';
+      document.getElementById('hostDashboard').classList.add('hidden');
+      document.getElementById('pinGateModal').classList.remove('hidden');
+    }
+
+    function renderHostState(state) {
+      if (!state) return;
+      lastHostState = state;
+
+      const np = state.now_playing;
+      if (np) {
+        document.getElementById('hostNowTitle').textContent = np.title;
+        document.getElementById('hostNowArtist').textContent =
+          `${np.artist} // REQ BY: ${np.requested_by_name}`;
+        document.getElementById('hostNowStage').textContent =
+          (np.scene && np.scene.stage_title) ? np.scene.stage_title : 'STAGE 01';
+      }
+
+      // Pending Open Search Approvals
+      const pending = state.pending_approvals || [];
+      document.getElementById('pendingCountBadge').textContent = pending.length;
+      const pList = document.getElementById('pendingApprovalList');
+      if (pending.length === 0) {
+        pList.innerHTML = `<div class="text-[9px] text-gray-500 py-6 text-center">NO PENDING OPEN SEARCH REQUESTS</div>`;
+      } else {
+        pList.innerHTML = pending.map(item => `
+          <div class="p-3 bg-black/80 border-2 border-amber-400 flex items-center justify-between gap-3">
+            <div class="min-w-0 flex-1">
+              <div class="text-[10px] text-white truncate mb-1">${escapeHtml(item.title)}</div>
+              <div class="text-[8px] text-gray-400 truncate mb-1">${escapeHtml(item.artist)}</div>
+              <div class="text-[8px] text-amber-300">DJ: ${escapeHtml(item.requested_by_name)}</div>
+            </div>
+            <div class="flex items-center gap-2 shrink-0">
+              <button
+                onclick="hostQueueAction('approve', ${item.id})"
+                class="arcade-btn px-3 py-2 bg-emerald-400 text-black text-[8px]"
+              >
+                APPROVE
+              </button>
+              <button
+                onclick="hostQueueAction('reject', ${item.id})"
+                class="arcade-btn px-3 py-2 bg-red-600 text-white text-[8px]"
+              >
+                REJECT
+              </button>
+            </div>
+          </div>
+        `).join('');
+      }
+
+      // Active Queue
+      const rawQueue = state.queue || [];
+      document.getElementById('activeQueueCount').textContent = `(${rawQueue.length})`;
+      const qList = document.getElementById('hostActiveQueueList');
+      if (rawQueue.length === 0) {
+        qList.innerHTML = `<div class="text-[9px] text-gray-500 py-6 text-center">ACTIVE QUEUE EMPTY (SEED AUTO-DJ)</div>`;
+      } else {
+        const sortedQueue = rawQueue.map((item, idx) => ({ ...item, playOrderRank: idx + 1 }));
+        if (hostSortMode === 'title') {
+          sortedQueue.sort((a, b) => (a.title || '').localeCompare(b.title || ''));
+        } else if (hostSortMode === 'artist') {
+          sortedQueue.sort((a, b) => (a.artist || '').localeCompare(b.artist || ''));
+        } else if (hostSortMode === 'dj') {
+          sortedQueue.sort((a, b) => (a.requested_by_name || '').localeCompare(b.requested_by_name || ''));
+        } else if (hostSortMode === 'recent') {
+          sortedQueue.sort((a, b) => (b.id || 0) - (a.id || 0));
+        }
+
+        qList.innerHTML = sortedQueue.map((item) => `
+          <div class="p-2.5 bg-black/70 border-2 ${item.playOrderRank === 1 ? 'border-emerald-400' : 'border-gray-700'} flex items-center justify-between gap-2">
+            <div class="min-w-0 flex-1">
+              <div class="text-[10px] text-white truncate mb-1">
+                <span class="text-amber-300">#${item.playOrderRank}</span> ${escapeHtml(item.title)} <span class="text-[#00f5d4]">(${item.votes}V)</span>
+              </div>
+              <div class="text-[8px] text-gray-400 truncate">
+                ${escapeHtml(item.artist)} // DJ: ${escapeHtml(item.requested_by_name)}
+              </div>
+            </div>
+            <div class="flex items-center gap-1.5 shrink-0">
+              ${item.playOrderRank > 1 ? `
+                <button
+                  onclick="hostQueueAction('promote_top', ${item.id})"
+                  title="Promote to #1 Up Next"
+                  class="arcade-btn px-2 py-1.5 bg-gray-800 hover:bg-emerald-500 hover:text-black text-[#00f5d4] text-[8px]"
+                >
+                  ^TOP
+                </button>
+              ` : ''}
+              <button
+                onclick="hostQueueAction('reject', ${item.id})"
+                title="Remove Track"
+                class="arcade-btn px-2.5 py-1.5 bg-gray-800 hover:bg-red-600 text-red-400 hover:text-white text-[9px] shrink-0"
+              >
+                X
+              </button>
+            </div>
+          </div>
+        `).join('');
+      }
+
+      if (state.seed_pool) {
+        document.getElementById('seedPoolSummary').textContent =
+          `CURRENT SEED POOL: ${state.seed_pool.length} PRE-VALIDATED TRACKS READY FOR FAST-TRACK & IDLE PLAY`;
+      }
+    }
+
+    async function triggerVetoSkip() {
+      try {
+        const res = await fetch('/api/host/action', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pin: hostPin, action: 'veto_skip' })
+        });
+        const data = await res.json();
+        if (res.ok) {
+          showHostToast(data.message || "6S CROSSFADE SKIP TRIGGERED!");
+        }
+      } catch (e) {
+        showHostToast("VETO COMMAND FAILED");
+      }
+    }
+
+    async function sendTransportControl(action, seconds = 15) {
+      try {
+        const res = await fetch('/api/host/action', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pin: hostPin, action: action, seconds: seconds })
+        });
+        const data = await res.json();
+        if (res.ok) {
+          showHostToast(data.message || "TRANSPORT COMMAND SENT!");
+        }
+      } catch (e) {
+        showHostToast("TRANSPORT COMMAND FAILED");
+      }
+    }
+
+    async function setHostVizMode(modeId, label) {
+      // Update active button styling in Host panel
+      document.querySelectorAll('#hostVizButtons button').forEach(btn => {
+        if (btn.getAttribute('data-viz') === modeId) {
+          btn.className = 'arcade-btn px-2.5 py-2 bg-cyan-500 text-black text-[8px] flex-1 sm:flex-initial';
+        } else {
+          btn.className = 'arcade-btn px-2.5 py-2 bg-[#1b113a] text-[#00f5d4] text-[8px] flex-1 sm:flex-initial';
+        }
+      });
+
+      // Instant postMessage if opened inside the Big Screen popup modal
+      try {
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage({ type: 'set_viz_mode', viz_mode: modeId }, '*');
+        }
+      } catch (err) {}
+
+      // Also broadcast over backend WebSocket so remote Host sessions control the TV
+      await sendTransportControl(`set_viz_mode:${modeId}`, 0);
+      showHostToast(`VISUALIZER SET TO: ${label}`);
+    }
+
+    async function hostQueueAction(action, queueId) {
+      try {
+        const res = await fetch('/api/host/action', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pin: hostPin, action: action, queue_id: queueId })
+        });
+        const data = await res.json();
+        if (res.ok) {
+          if (action === 'approve') showHostToast("TRACK APPROVED -> LIVE QUEUE!");
+          else if (action === 'promote_top') showHostToast(data.message || "PROMOTED TO #1!");
+          else showHostToast("TRACK REMOVED!");
+        }
+      } catch (e) {
+        showHostToast("HOST ACTION FAILED");
+      }
+    }
+
+    async function loadSeedPlaylist(e) {
+      e.preventDefault();
+      const playlistId = document.getElementById('playlistIdInput').value.trim();
+      if (!playlistId) return;
+      const btn = document.getElementById('loadPlaylistBtn');
+      btn.textContent = "LOADING...";
+      btn.disabled = true;
+
+      try {
+        const res = await fetch('/api/host/action', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            pin: hostPin,
+            action: 'load_playlist',
+            playlist_id: playlistId
+          })
+        });
+        const data = await res.json();
+        if (res.ok) {
+          showHostToast(data.message || "SEED PLAYLIST UPDATED!");
+          document.getElementById('playlistIdInput').value = '';
+        } else {
+          showHostToast(data.detail || "FAILED TO LOAD PLAYLIST");
+        }
+      } catch (err) {
+        showHostToast("ERROR LOADING PLAYLIST");
+      } finally {
+        btn.textContent = "LOAD SEED PLAYLIST";
+        btn.disabled = false;
+      }
+    }
+
+    function connectHostWS() {
+      if (!hostPin) return;
+      if (hostWs) hostWs.close();
+
+      const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+      hostWs = new WebSocket(`${proto}//${location.host}/ws?role=host&client_id=host_admin&pin=${encodeURIComponent(hostPin)}`);
+
+      hostWs.onopen = () => {
+        document.getElementById('hostWsStatus').textContent = 'WS: CONNECTED';
+      };
+
+      hostWs.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+          if (msg.type === 'state_sync') {
+            renderHostState(msg);
+          }
+        } catch (err) {
+          console.error(err);
+        }
+      };
+
+      hostWs.onclose = () => {
+        document.getElementById('hostWsStatus').textContent = 'WS: RECONNECTING...';
+        if (hostPin) setTimeout(connectHostWS, 2000);
+      };
+    }
+
+    // Auto-unlock if PIN already saved in sessionStorage
+    if (hostPin) {
+      document.getElementById('pinInput').value = hostPin;
+      verifyHostPin(null);
+    }
+  </script>
+</body>
+</html>

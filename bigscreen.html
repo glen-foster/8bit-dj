@@ -1,0 +1,1403 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>8-BIT JUKEBOX // BIG SCREEN ARCADE HUD</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg-primary: #090518;
+      --bg-secondary: #1d1138;
+      --accent-neon: #00f5d4;
+      --pixel-highlight: #ff2a85;
+    }
+
+    * {
+      box-sizing: border-box;
+      font-family: 'Press Start 2P', monospace;
+      user-select: none;
+    }
+
+    body {
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      background-color: var(--bg-primary);
+      color: #ffffff;
+    }
+
+    #arcadeCanvas {
+      position: fixed;
+      inset: 0;
+      width: 100vw;
+      height: 100vh;
+      z-index: 1;
+      image-rendering: pixelated;
+      image-rendering: crisp-edges;
+    }
+
+    /* Subtle CRT Scanline Overlay */
+    .crt-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 2;
+      pointer-events: none;
+      background:
+        linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.35) 50%),
+        radial-gradient(circle at center, transparent 60%, rgba(0, 0, 0, 0.55) 100%);
+      background-size: 100% 4px, 100% 100%;
+    }
+
+    .hud-layer {
+      position: fixed;
+      inset: 0;
+      z-index: 10;
+      width: 100%;
+      height: 100%;
+      max-width: 100vw;
+      max-height: 100vh;
+      overflow: hidden;
+      display: grid;
+      grid-template-columns: repeat(12, minmax(0, 1fr));
+      padding: clamp(0.75rem, 1.4vw, 1.5rem);
+      gap: clamp(0.75rem, 1.2vw, 1.25rem);
+    }
+
+    .hud-layer * {
+      min-width: 0;
+    }
+
+    .pixel-box {
+      background: rgba(9, 5, 24, 0.82);
+      border: 4px solid var(--accent-neon);
+      box-shadow:
+        0 0 0 4px #000000,
+        0 0 24px rgba(0, 245, 212, 0.25),
+        inset 0 0 18px rgba(0, 0, 0, 0.85);
+      transition: border-color 0.6s ease, box-shadow 0.6s ease;
+    }
+
+    .pixel-box-highlight {
+      background: rgba(9, 5, 24, 0.86);
+      border: 4px solid var(--pixel-highlight);
+      box-shadow:
+        0 0 0 4px #000000,
+        0 0 28px rgba(255, 42, 133, 0.35),
+        inset 0 0 18px rgba(0, 0, 0, 0.85);
+      transition: border-color 0.6s ease, box-shadow 0.6s ease;
+    }
+
+    .neon-text {
+      color: var(--accent-neon);
+      text-shadow: 3px 3px 0px #000, 0 0 12px var(--accent-neon);
+    }
+
+    .highlight-text {
+      color: var(--pixel-highlight);
+      text-shadow: 3px 3px 0px #000, 0 0 12px var(--pixel-highlight);
+    }
+
+    @keyframes marqueeScroll {
+      0% { transform: translateX(100%); }
+      100% { transform: translateX(-100%); }
+    }
+
+    .ticker-wrap {
+      overflow: hidden;
+      white-space: nowrap;
+    }
+
+    .ticker-move {
+      display: inline-block;
+      padding-left: 20%;
+      animation: marqueeScroll 22s linear infinite;
+    }
+
+    @keyframes blinkSlow {
+      0%, 49% { opacity: 1; }
+      50%, 100% { opacity: 0.25; }
+    }
+
+    .blink-arcade {
+      animation: blinkSlow 1.1s infinite;
+    }
+  </style>
+</head>
+<body>
+  <!-- Full-Screen Audio-Reactive AI 8-Bit Canvas -->
+  <canvas id="arcadeCanvas" width="320" height="180"></canvas>
+  <div class="crt-overlay"></div>
+
+  <!-- Dual-Deck HTML5 Audio Elements -->
+  <audio id="deckA" crossorigin="anonymous" preload="auto"></audio>
+  <audio id="deckB" crossorigin="anonymous" preload="auto"></audio>
+
+  <!-- Autoplay Unlock Modal (only shown if browser blocks initial unmuted AudioContext) -->
+  <div id="audioUnlockBanner" class="hidden fixed inset-0 z-50 bg-black/90 flex flex-col items-center justify-center p-8 text-center">
+    <div class="pixel-box-highlight p-8 max-w-xl">
+      <div class="text-xl highlight-text mb-4">INSERT COIN TO INITIALIZE SOUND SYSTEM</div>
+      <p class="text-xs text-gray-300 leading-relaxed mb-6">
+        CLICK ANYWHERE OR PRESS ANY KEY TO START THE DUAL-DECK WEB AUDIO ENGINE
+      </p>
+      <button id="unlockAudioBtn" class="px-6 py-4 bg-pink-600 border-4 border-white text-white text-sm hover:bg-pink-500">
+        [ START 8-BIT AUDIO ENGINE ]
+      </button>
+    </div>
+  </div>
+
+  <!-- Host Admin Overlay Modal (Triggered by [HOST] button or 'H' key) -->
+  <div id="hostOverlayModal" class="hidden fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-6">
+    <div class="pixel-box-highlight w-full max-w-4xl h-[85vh] flex flex-col overflow-hidden">
+      <div class="px-4 py-3 bg-black/90 border-b-4 border-pink-500 flex items-center justify-between">
+        <div class="flex items-center gap-3">
+          <span class="px-2 py-1 bg-pink-600 text-white text-[10px]">ADMIN POPUP</span>
+          <span class="text-xs highlight-text">HOST COMMAND CONSOLE</span>
+        </div>
+        <div class="flex items-center gap-3">
+          <span class="text-[9px] text-gray-400">PRESS [ESC] OR [H] TO CLOSE</span>
+          <button
+            onclick="toggleHostModal(false)"
+            class="px-3 py-1.5 bg-red-600 hover:bg-red-500 border-2 border-white text-white text-[10px]"
+          >
+            [ X CLOSE ]
+          </button>
+        </div>
+      </div>
+      <iframe id="hostModalIframe" src="about:blank" class="w-full flex-1 border-0 bg-[#090518]"></iframe>
+    </div>
+  </div>
+
+  <!-- Foreground 1080p Arcade HUD (Two-Column Wireframe Layout) -->
+  <div class="hud-layer">
+    <!-- Left Column (col-span-7): Top Title Bar + Open 8-Bit Stage Window + Bottom Now Playing Card -->
+    <section class="col-span-7 flex flex-col justify-between gap-4 min-h-0 min-w-0">
+      <!-- Top Box: Full-Width Stage Title Bar -->
+      <header class="pixel-box-highlight px-4 py-3 flex items-center justify-center min-w-0 shrink-0">
+        <div id="stageTitle" class="text-xs xl:text-base highlight-text truncate text-center w-full min-w-0">
+          STAGE 01: NEON SYNTHWAVE ARENA
+        </div>
+        <span id="sceneSourceTag" class="hidden">[GEMINI AI]</span>
+      </header>
+
+      <!-- Open Middle Area so the Full-Screen 8-Bit AI Canvas shines unobstructed -->
+      <div class="flex-1 min-h-0 pointer-events-none"></div>
+
+      <!-- Bottom Box: Now Playing + System Status + Dual-Deck Telemetry -->
+      <div class="pixel-box p-5 min-w-0 shrink-0">
+        <div class="flex flex-wrap items-center justify-between gap-2 mb-3 min-w-0">
+          <div class="flex items-center gap-2.5 min-w-0">
+            <span class="px-2.5 py-1.5 bg-pink-600 text-white text-[10px] xl:text-xs blink-arcade shrink-0">NOW PLAYING</span>
+            <span id="nowPlayingSeedBadge" class="text-[10px] xl:text-xs text-amber-300 truncate">REQ BY: 8BIT_AUTODJ</span>
+          </div>
+          <div class="flex items-center gap-2.5 shrink-0">
+            <div class="flex items-center gap-1.5 pr-2 border-r border-gray-700">
+              <span id="wsDot" class="inline-block w-2.5 h-2.5 bg-emerald-400 shrink-0"></span>
+              <span id="wsStatusText" class="text-[9px] xl:text-[10px] neon-text">ONLINE</span>
+            </div>
+            <span id="activeDeckBadge" class="text-[10px] xl:text-xs neon-text">DECK A [LIVE]</span>
+            <span id="crossfadeBadge" class="px-2 py-1 border border-gray-600 text-[9px] xl:text-[10px] text-gray-300">
+              EBU R128
+            </span>
+            <span id="bufferStatusBadge" class="text-[9px] xl:text-[10px] text-emerald-400">
+              [READY]
+            </span>
+          </div>
+        </div>
+
+        <h1 id="nowPlayingTitle" class="text-xl xl:text-3xl text-white mb-2 truncate">
+          LOADING TRACK...
+        </h1>
+        <div id="nowPlayingArtist" class="text-sm xl:text-lg neon-text mb-4 truncate">
+          PLEASE WAIT
+        </div>
+
+        <!-- Dual-Deck Gain Meters & Progress Bar -->
+        <div class="space-y-2.5">
+          <div class="flex justify-between text-xs xl:text-sm text-gray-200">
+            <span id="timeElapsed">00:00</span>
+            <span id="crossfadeNotice" class="hidden highlight-text blink-arcade truncate px-2">
+              >>> 6S CROSSFADE ACTIVE <<<
+            </span>
+            <span id="timeTotal">03:30</span>
+          </div>
+          <div class="w-full h-5 xl:h-6 bg-black border-2 border-white p-0.5 relative">
+            <div
+              id="progressBarFill"
+              class="h-full transition-all duration-200"
+              style="width: 0%; background: linear-gradient(90deg, var(--accent-neon), var(--pixel-highlight));"
+            ></div>
+          </div>
+          <div class="grid grid-cols-2 gap-4 pt-1 text-[10px] xl:text-xs text-gray-300">
+            <div class="flex items-center gap-2 min-w-0">
+              <span class="shrink-0">DECK A:</span>
+              <div class="flex-1 h-2.5 bg-black border border-gray-500">
+                <div id="deckAGainBar" class="h-full bg-emerald-400" style="width: 100%"></div>
+              </div>
+            </div>
+            <div class="flex items-center gap-2 min-w-0">
+              <span class="shrink-0">DECK B:</span>
+              <div class="flex-1 h-2.5 bg-black border border-gray-500">
+                <div id="deckBGainBar" class="h-full bg-pink-500" style="width: 0%"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Right Column (col-span-5): Full-Height Track List + Bottom Row (DJ Count & List | Larger QR Code) -->
+    <aside class="col-span-5 flex flex-col justify-between gap-4 min-h-0 min-w-0">
+      <!-- Top Box: Track List (Spans from top edge down to bottom row) -->
+      <div class="pixel-box p-4 flex-1 flex flex-col min-h-0 min-w-0">
+        <div class="flex items-center justify-between border-b-2 border-gray-700 pb-2.5 mb-3 gap-2 shrink-0">
+          <span class="text-xs xl:text-sm neon-text truncate">UP NEXT // LIVE QUEUE</span>
+          <span id="queueCountBadge" class="text-xs text-amber-300 shrink-0">0 QUEUED</span>
+        </div>
+        <div id="upNextList" class="space-y-2.5 overflow-y-auto pr-1 flex-1 min-h-0">
+          <!-- Dynamically populated queued tracks -->
+        </div>
+      </div>
+
+      <!-- Bottom Row: DJ Count and List + Larger QR Code -->
+      <div class="grid grid-cols-12 gap-4 items-stretch min-w-0 shrink-0">
+        <!-- Left Box: DJ Count and List -->
+        <div class="col-span-6 pixel-box p-4 flex flex-col justify-between min-w-0">
+          <div>
+            <div class="flex items-center justify-between border-b-2 border-gray-700 pb-2 mb-3 gap-2">
+              <span class="text-xs highlight-text truncate">TOP DJs</span>
+              <span class="text-[10px] xl:text-xs text-gray-300 shrink-0">
+                DJs: <span id="telemetryDjs" class="neon-text">01</span>
+              </span>
+            </div>
+            <div id="leaderboardList" class="space-y-2 text-[11px] xl:text-xs min-w-0">
+              <!-- Dynamically populated -->
+            </div>
+          </div>
+        </div>
+
+        <!-- Right Box: Larger QR Code (Clickable to Open Host Console) -->
+        <div
+          onclick="toggleHostModal()"
+          title="Click to open Host Controls (Shortcut: H)"
+          class="col-span-6 pixel-box-highlight p-3.5 flex flex-col items-center justify-between text-center min-w-0 cursor-pointer hover:brightness-110 transition-all"
+        >
+          <div class="text-[10px] xl:text-xs text-white truncate w-full">JOIN THE PARTY!</div>
+          <div class="bg-black p-2 border-2 border-white my-2 shrink-0">
+            <img
+              id="qrCodeImg"
+              src="/api/qrcode"
+              alt="QR Code"
+              class="w-36 h-36 xl:w-44 xl:h-44 object-contain"
+              style="image-rendering: pixelated;"
+            />
+          </div>
+          <div id="publicUrlLabel" class="text-[9px] xl:text-[10px] neon-text truncate w-full leading-tight">
+            SCAN TO VOTE &amp; DJ
+          </div>
+        </div>
+      </div>
+    </aside>
+  </div>
+
+  <script>
+    // =========================================================================
+    // 1. STATE & THEME PALETTE MANAGEMENT
+    // =========================================================================
+    let appState = null;
+    let currentScene = {
+      stage_title: "STAGE 01: NEON SYNTHWAVE ARENA",
+      flavor_text: "A wild 8-BIT AUTODJ appeared! Bass cannons charged to 100%!",
+      palette: {
+        bg_primary: "#090518",
+        bg_secondary: "#1d1138",
+        accent_neon: "#00f5d4",
+        pixel_highlight: "#ff2a85"
+      },
+      sprites: []
+    };
+
+    function applyPalette(palette) {
+      if (!palette) return;
+      const root = document.documentElement;
+      if (palette.bg_primary) root.style.setProperty('--bg-primary', palette.bg_primary);
+      if (palette.bg_secondary) root.style.setProperty('--bg-secondary', palette.bg_secondary);
+      if (palette.accent_neon) root.style.setProperty('--accent-neon', palette.accent_neon);
+      if (palette.pixel_highlight) root.style.setProperty('--pixel-highlight', palette.pixel_highlight);
+    }
+
+    function formatTime(sec) {
+      if (!sec || isNaN(sec) || sec < 0) return "00:00";
+      const m = Math.floor(sec / 60);
+      const s = Math.floor(sec % 60);
+      return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+    }
+
+    // =========================================================================
+    // 2. DUAL-DECK WEB AUDIO API ENGINE + 6-SECOND EQUAL-POWER CROSSFADER
+    // =========================================================================
+    const deckAEl = document.getElementById('deckA');
+    const deckBEl = document.getElementById('deckB');
+
+    let audioCtx = null;
+    let analyser = null;
+    let gainNodeA = null;
+    let gainNodeB = null;
+    let freqData = new Uint8Array(64);
+    let timeData = new Uint8Array(64);
+
+    let activeDeck = 'A'; // 'A' or 'B'
+    let activeVideoId = null;
+    let preloadedNextVideoId = null;
+    let isCrossfading = false;
+    let crossfadeTimer = null;
+    let advanceRequestedForId = null;
+
+    function initAudioGraph() {
+      if (audioCtx) return;
+      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+      audioCtx = new AudioContextClass();
+
+      analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 128;
+      analyser.smoothingTimeConstant = 0.78;
+      freqData = new Uint8Array(analyser.frequencyBinCount);
+      timeData = new Uint8Array(analyser.frequencyBinCount);
+
+      gainNodeA = audioCtx.createGain();
+      gainNodeB = audioCtx.createGain();
+      gainNodeA.gain.value = 1.0;
+      gainNodeB.gain.value = 0.0;
+
+      const sourceA = audioCtx.createMediaElementSource(deckAEl);
+      const sourceB = audioCtx.createMediaElementSource(deckBEl);
+
+      sourceA.connect(gainNodeA);
+      sourceB.connect(gainNodeB);
+
+      gainNodeA.connect(analyser);
+      gainNodeB.connect(analyser);
+      analyser.connect(audioCtx.destination);
+    }
+
+    async function ensureAudioUnlocked() {
+      initAudioGraph();
+      if (audioCtx && audioCtx.state === 'suspended') {
+        try {
+          await audioCtx.resume();
+        } catch (err) {
+          console.warn("AudioContext resume needs gesture:", err);
+        }
+      }
+      if (audioCtx && audioCtx.state === 'running') {
+        document.getElementById('audioUnlockBanner').classList.add('hidden');
+      }
+    }
+
+    document.addEventListener('click', () => {
+      ensureAudioUnlocked();
+      const activeEl = activeDeck === 'A' ? deckAEl : deckBEl;
+      if (activeEl.src && activeEl.paused) {
+        activeEl.play().catch(() => {});
+      }
+    });
+    document.addEventListener('keydown', () => ensureAudioUnlocked());
+    document.getElementById('unlockAudioBtn').addEventListener('click', () => ensureAudioUnlocked());
+
+    function getDeckElements() {
+      return activeDeck === 'A'
+        ? { currentEl: deckAEl, nextEl: deckBEl, currentGain: gainNodeA, nextGain: gainNodeB, nextDeckName: 'B' }
+        : { currentEl: deckBEl, nextEl: deckAEl, currentGain: gainNodeB, nextGain: gainNodeA, nextDeckName: 'A' };
+    }
+
+    function loadAndPlayOnActiveDeck(track) {
+      if (!track || !track.video_id) return;
+      ensureAudioUnlocked();
+
+      activeVideoId = track.video_id;
+      const { currentEl, currentGain, nextGain } = getDeckElements();
+      const targetUrl = `/api/audio/${track.video_id}`;
+
+      if (!currentEl.src.endsWith(targetUrl)) {
+        currentEl.src = targetUrl;
+        currentEl.load();
+      }
+      if (currentGain && nextGain) {
+        currentGain.gain.value = 1.0;
+        nextGain.gain.value = 0.0;
+      }
+      updateGainBars();
+
+      currentEl.play().then(() => {
+        document.getElementById('audioUnlockBanner').classList.add('hidden');
+      }).catch(() => {
+        document.getElementById('audioUnlockBanner').classList.remove('hidden');
+      });
+
+      if (track.scene) {
+        currentScene = track.scene;
+        applyPalette(currentScene.palette);
+        updateStageHeader();
+      }
+    }
+
+    function preloadNextDeck(nextTrack) {
+      if (!nextTrack || !nextTrack.video_id || isCrossfading) return;
+      if (!nextTrack.audio_ready) return;
+      if (preloadedNextVideoId === nextTrack.video_id) return;
+
+      const { nextEl } = getDeckElements();
+      const targetUrl = `/api/audio/${nextTrack.video_id}`;
+      nextEl.src = targetUrl;
+      nextEl.load();
+      preloadedNextVideoId = nextTrack.video_id;
+    }
+
+    function updateGainBars() {
+      const gA = gainNodeA ? Math.round(gainNodeA.gain.value * 100) : (activeDeck === 'A' ? 100 : 0);
+      const gB = gainNodeB ? Math.round(gainNodeB.gain.value * 100) : (activeDeck === 'B' ? 100 : 0);
+      document.getElementById('deckAGainBar').style.width = `${gA}%`;
+      document.getElementById('deckBGainBar').style.width = `${gB}%`;
+      document.getElementById('activeDeckBadge').textContent =
+        isCrossfading ? `X-FADE ${activeDeck} -> ${activeDeck === 'A' ? 'B' : 'A'}` : `DECK ${activeDeck} [LIVE]`;
+    }
+
+    async function triggerSixSecondCrossfade(forcedNextTrack = null, notifyBackendAdvance = true) {
+      if (isCrossfading) return;
+      isCrossfading = true;
+
+      document.getElementById('crossfadeNotice').classList.remove('hidden');
+      document.getElementById('crossfadeBadge').textContent = "6S X-FADE ACTIVE";
+      document.getElementById('crossfadeBadge').className = "px-2 py-1 border-2 border-pink-500 text-[9px] highlight-text";
+
+      ensureAudioUnlocked();
+      const { currentEl, nextEl, currentGain, nextGain, nextDeckName } = getDeckElements();
+
+      let targetTrack = forcedNextTrack;
+      if (notifyBackendAdvance) {
+        try {
+          const res = await fetch('/api/advance', { method: 'POST' });
+          const data = await res.json();
+          if (data && data.now_playing) {
+            targetTrack = data.now_playing;
+          }
+        } catch (err) {
+          console.error("Failed to advance track:", err);
+        }
+      }
+
+      if (targetTrack && targetTrack.video_id) {
+        activeVideoId = targetTrack.video_id;
+        const nextUrl = `/api/audio/${targetTrack.video_id}`;
+        if (!nextEl.src.endsWith(nextUrl)) {
+          nextEl.src = nextUrl;
+          nextEl.load();
+        }
+        if (targetTrack.scene) {
+          currentScene = targetTrack.scene;
+          applyPalette(currentScene.palette);
+          updateStageHeader();
+        }
+      }
+
+      // Wait until nextEl has buffered enough audio to play (readyState >= 3)
+      // so the outgoing track keeps playing with zero dead air while normalizing!
+      if (nextEl.readyState < 3) {
+        document.getElementById('crossfadeBadge').textContent = "BUFFERING NEXT...";
+        await new Promise((resolve) => {
+          let resolved = false;
+          const done = () => {
+            if (resolved) return;
+            resolved = true;
+            nextEl.removeEventListener('canplay', done);
+            nextEl.removeEventListener('error', done);
+            resolve();
+          };
+          nextEl.addEventListener('canplay', done, { once: true });
+          nextEl.addEventListener('error', done, { once: true });
+          setTimeout(done, 15000);
+        });
+      }
+
+      document.getElementById('crossfadeBadge').textContent = "6S X-FADE ACTIVE";
+      nextEl.currentTime = 0;
+      await nextEl.play().catch(err => console.warn("Next deck play warning:", err));
+
+      // 6-second equal-power crossfade curve (60 steps @ 100ms)
+      const durationMs = 6000;
+      const steps = 60;
+      const stepTime = durationMs / steps;
+      let step = 0;
+
+      if (crossfadeTimer) clearInterval(crossfadeTimer);
+      crossfadeTimer = setInterval(() => {
+        step++;
+        const progress = Math.min(1, step / steps);
+        // Equal-power crossfade: cos / sin curve
+        const fadeOutGain = Math.cos(progress * 0.5 * Math.PI);
+        const fadeInGain = Math.sin(progress * 0.5 * Math.PI);
+
+        if (currentGain && nextGain) {
+          currentGain.gain.value = Math.max(0, fadeOutGain);
+          nextGain.gain.value = Math.min(1, fadeInGain);
+        }
+        updateGainBars();
+
+        if (progress >= 1) {
+          clearInterval(crossfadeTimer);
+          crossfadeTimer = null;
+          currentEl.pause();
+          currentEl.currentTime = 0;
+          activeDeck = nextDeckName;
+          preloadedNextVideoId = null;
+          isCrossfading = false;
+          document.getElementById('crossfadeNotice').classList.add('hidden');
+          document.getElementById('crossfadeBadge').textContent = "EBU R128 -14 LUFS";
+          document.getElementById('crossfadeBadge').className = "px-2 py-1 border-2 border-gray-600 text-[9px] text-gray-400";
+          updateGainBars();
+        }
+      }, stepTime);
+    }
+
+    // Monitor active deck playback progress and trigger 6-second crossfade at T-6s
+    setInterval(() => {
+      const { currentEl } = getDeckElements();
+      if (!currentEl || currentEl.paused || !currentEl.duration || isNaN(currentEl.duration)) return;
+
+      const cur = currentEl.currentTime;
+      const dur = currentEl.duration;
+      const pct = Math.min(100, (cur / dur) * 100);
+
+      document.getElementById('timeElapsed').textContent = formatTime(cur);
+      document.getElementById('timeTotal').textContent = formatTime(dur);
+      document.getElementById('progressBarFill').style.width = `${pct.toFixed(1)}%`;
+
+      const remaining = dur - cur;
+      if (remaining <= 6.2 && remaining > 0.2 && !isCrossfading && dur > 12) {
+        triggerSixSecondCrossfade(null, true);
+      }
+    }, 200);
+
+    deckAEl.addEventListener('ended', () => {
+      if (activeDeck === 'A' && !isCrossfading) triggerSixSecondCrossfade(null, true);
+    });
+    deckBEl.addEventListener('ended', () => {
+      if (activeDeck === 'B' && !isCrossfading) triggerSixSecondCrossfade(null, true);
+    });
+
+    // =========================================================================
+    // 3. AUDIO-REACTIVE 8-BIT PIXEL CANVAS ENGINE (MULTI-STYLE + WINAMP + SIDE-SCROLLER)
+    // =========================================================================
+    const canvas = document.getElementById('arcadeCanvas');
+    const ctx = canvas.getContext('2d');
+    const W = canvas.width;   // 320
+    const H = canvas.height;  // 180
+
+    const VIZ_MODES = [
+      { id: 'auto', label: 'AUTO' },
+      { id: 'side_scroller', label: 'SIDE-SCROLLER' },
+      { id: 'winamp_analyzer', label: 'WINAMP LED' },
+      { id: 'winamp_fire', label: 'WINAMP FIRE' },
+      { id: 'city_cruiser', label: 'CITY SKYLINE' },
+      { id: 'synth_grid', label: 'SYNTH GRID' }
+    ];
+    let vizModeIdx = 0; // 0 = 'auto'
+
+    function cycleVizMode() {
+      vizModeIdx = (vizModeIdx + 1) % VIZ_MODES.length;
+    }
+
+    function setVizModeById(modeId) {
+      if (modeId === 'cycle') {
+        cycleVizMode();
+        return;
+      }
+      const idx = VIZ_MODES.findIndex(m => m.id === modeId);
+      if (idx !== -1) {
+        vizModeIdx = idx;
+      }
+    }
+
+    function resolveActiveVizStyle(sprites) {
+      const selected = VIZ_MODES[vizModeIdx].id;
+      if (selected !== 'auto') return selected;
+
+      // If scene explicitly specifies a valid bg_style from Gemini or fallback
+      if (currentScene && currentScene.bg_style && VIZ_MODES.some(m => m.id === currentScene.bg_style)) {
+        return currentScene.bg_style;
+      }
+
+      // Automatically favor side_scroller when character/walker sprites are present!
+      const hasCharacters = sprites.some(s => s.behavior === 'dancers' || s.behavior === 'scroll');
+      if (hasCharacters) {
+        const titleStr = (currentScene && currentScene.stage_title) ? currentScene.stage_title : '';
+        let hash = 0;
+        for (let i = 0; i < titleStr.length; i++) hash = (hash * 31 + titleStr.charCodeAt(i)) >>> 0;
+        const charModes = ['side_scroller', 'side_scroller', 'city_cruiser', 'winamp_analyzer'];
+        return charModes[hash % charModes.length];
+      }
+
+      const titleStr = (currentScene && currentScene.stage_title) ? currentScene.stage_title : 'STAGE';
+      let hash = 0;
+      for (let i = 0; i < titleStr.length; i++) hash = (hash * 31 + titleStr.charCodeAt(i)) >>> 0;
+      const allAutoModes = ['winamp_analyzer', 'side_scroller', 'winamp_fire', 'city_cruiser', 'synth_grid'];
+      return allAutoModes[hash % allAutoModes.length];
+    }
+
+    // Pre-initialize scrolling starfield, clouds, buildings, fire particles, and Winamp peak-hold caps
+    const stars = Array.from({ length: 55 }, () => ({
+      x: Math.random() * W,
+      y: Math.random() * (H * 0.65),
+      speed: 0.2 + Math.random() * 1.1,
+      size: Math.random() > 0.75 ? 2 : 1
+    }));
+
+    const clouds = Array.from({ length: 6 }, (_, i) => ({
+      x: (i * 62) % W,
+      y: 16 + (i % 3) * 18,
+      w: 24 + (i % 2) * 12,
+      speed: 0.18 + (i % 3) * 0.08
+    }));
+
+    const buildings = Array.from({ length: 18 }, (_, i) => ({
+      w: 16 + (i * 7) % 14,
+      h: 28 + (i * 19) % 52,
+      windowsSeed: (i * 97) + 13
+    }));
+
+    const fireEmbers = Array.from({ length: 45 }, () => ({
+      x: Math.random() * W,
+      y: H * 0.5 + Math.random() * (H * 0.5),
+      vx: (Math.random() - 0.5) * 0.5,
+      vy: 0.5 + Math.random() * 1.4,
+      size: Math.random() > 0.6 ? 2 : 1
+    }));
+
+    const NUM_SPECTRUM_BARS = 32;
+    const peakCaps = new Float32Array(NUM_SPECTRUM_BARS);
+    const peakHoldFrames = new Int16Array(NUM_SPECTRUM_BARS);
+
+    const spriteActors = Array.from({ length: 8 }, (_, idx) => ({
+      x: 25 + (idx * 38) % (W - 40),
+      y: 25 + (idx * 23) % (H - 70),
+      vx: (idx % 2 === 0 ? 1 : -1) * (0.45 + (idx % 3) * 0.25),
+      vy: 0.35 + (idx % 2) * 0.25,
+      phase: idx * 0.9
+    }));
+
+    let frameTick = 0;
+
+    function getAudioEnergy() {
+      if (!analyser || !audioCtx || audioCtx.state !== 'running') {
+        const idlePulse = (Math.sin(frameTick * 0.06) + 1) * 0.25;
+        for (let i = 0; i < timeData.length; i++) {
+          timeData[i] = 128 + Math.floor(Math.sin(frameTick * 0.08 + i * 0.25) * 18);
+        }
+        return { bass: idlePulse, mid: idlePulse * 0.8, treble: idlePulse * 0.6 };
+      }
+      analyser.getByteFrequencyData(freqData);
+      analyser.getByteTimeDomainData(timeData);
+      let bassSum = 0;
+      let midSum = 0;
+      let trebleSum = 0;
+      for (let i = 0; i < 8; i++) bassSum += freqData[i];
+      for (let i = 8; i < 24; i++) midSum += freqData[i];
+      for (let i = 24; i < 48; i++) trebleSum += freqData[i];
+
+      return {
+        bass: (bassSum / (8 * 255)),
+        mid: (midSum / (16 * 255)),
+        treble: (trebleSum / (24 * 255))
+      };
+    }
+
+    function getBarValue(b, bass) {
+      if (analyser && audioCtx && audioCtx.state === 'running' && freqData) {
+        return freqData[b] / 255;
+      }
+      return Math.max(0.08, (Math.sin(frameTick * 0.07 + b * 0.35) * 0.35 + 0.4) * (0.5 + bass));
+    }
+
+    // Classic Winamp Segmented LED Spectrum Bars + Gravity Peak-Hold Caps
+    function drawWinampSegmentedBars(baseY, maxBarH, bass, pal, mirrored = false) {
+      const barWidth = 7;
+      const gap = 3;
+      const segH = 2;
+      const segGap = 1;
+      const step = segH + segGap;
+
+      for (let b = 0; b < NUM_SPECTRUM_BARS; b++) {
+        const val = getBarValue(b, bass);
+        const rawH = Math.max(step, Math.floor(val * maxBarH));
+        const bx = b * (barWidth + gap) + 2;
+
+        // Update gravity peak-hold cap
+        if (rawH >= peakCaps[b]) {
+          peakCaps[b] = rawH;
+          peakHoldFrames[b] = 18; // Hold at the peak for ~18 frames like classic Winamp
+        } else {
+          if (peakHoldFrames[b] > 0) {
+            peakHoldFrames[b]--;
+          } else {
+            peakCaps[b] = Math.max(step, peakCaps[b] - 0.85);
+          }
+        }
+
+        // Draw segmented LED blocks from bottom to top
+        const numSegments = Math.floor(rawH / step);
+        const maxSegments = Math.floor(maxBarH / step);
+        for (let s = 0; s < numSegments; s++) {
+          const ratio = s / Math.max(1, maxSegments);
+          // Classic Winamp gradient: green base -> yellow/neon middle -> hot pink/red top
+          if (ratio < 0.5) {
+            ctx.fillStyle = "#22c55e"; // Classic LED Green
+          } else if (ratio < 0.78) {
+            ctx.fillStyle = pal.accent_neon || "#eab308"; // Mid Neon / Amber
+          } else {
+            ctx.fillStyle = pal.pixel_highlight || "#ff2a85"; // Peak Red / Hot Pink
+          }
+
+          const sy = baseY - (s + 1) * step;
+          ctx.fillRect(bx, sy, barWidth, segH);
+
+          if (mirrored) {
+            ctx.globalAlpha = 0.45;
+            ctx.fillRect(bx, baseY + 2 + s * step, barWidth, segH);
+            ctx.globalAlpha = 1.0;
+          }
+        }
+
+        // Draw Peak-Hold Cap (bright white 2px bar)
+        const capY = Math.floor(baseY - peakCaps[b] - 2);
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(bx, capY, barWidth, 2);
+      }
+    }
+
+    // Classic Winamp Oscilloscope Waveform Ribbon
+    function drawOscilloscopeWaveform(centerY, amplitude, pal) {
+      const len = timeData.length;
+      const sliceW = W / len;
+      for (let i = 0; i < len; i++) {
+        const v = (timeData[i] - 128) / 128.0;
+        const y = Math.floor(centerY + v * amplitude);
+        const x = Math.floor(i * sliceW);
+        ctx.fillStyle = i % 2 === 0 ? pal.accent_neon : "#ffffff";
+        ctx.fillRect(x, y, Math.ceil(sliceW), 2);
+        // Subtle glow shadow
+        ctx.fillStyle = pal.pixel_highlight;
+        ctx.fillRect(x, y + 2, Math.ceil(sliceW), 1);
+      }
+    }
+
+    function drawPixelMatrix(matrix, startX, startY, scale, paletteColors, flipX = false) {
+      if (!Array.isArray(matrix)) return;
+      const rows = matrix.length;
+      for (let r = 0; r < rows; r++) {
+        const row = matrix[r];
+        if (!Array.isArray(row)) continue;
+        const cols = row.length;
+        for (let c = 0; c < cols; c++) {
+          const colorIdx = row[flipX ? (cols - 1 - c) : c];
+          if (!colorIdx || colorIdx <= 0) continue;
+          ctx.fillStyle = paletteColors[colorIdx] || '#ffffff';
+          ctx.fillRect(
+            Math.round(startX + c * scale),
+            Math.round(startY + r * scale),
+            scale,
+            scale
+          );
+        }
+      }
+    }
+
+    // -------------------------------------------------------------------------
+    // STAGE STYLE 1: SIDE-SCROLLER PLATFORMER (Great for character/dancer sets!)
+    // -------------------------------------------------------------------------
+    function renderSideScrollerStage(pal, bass, mid, treble) {
+      const groundY = Math.floor(H * 0.66); // Y=118
+
+      // 1. Parallax Pixel Clouds
+      for (const cl of clouds) {
+        cl.x -= cl.speed * (1 + bass * 0.8);
+        if (cl.x + cl.w < 0) cl.x = W + 12;
+        const cx = Math.floor(cl.x);
+        const cy = Math.floor(cl.y);
+        ctx.fillStyle = pal.bg_secondary;
+        ctx.fillRect(cx + 2, cy + 4, cl.w, 6);
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(cx, cy + 2, cl.w, 5);
+        ctx.fillRect(cx + 4, cy, cl.w - 8, 3);
+      }
+
+      // 2. Compact Winamp-style Mini LED Equalizer across the upper sky
+      for (let b = 0; b < NUM_SPECTRUM_BARS; b++) {
+        const val = getBarValue(b, bass);
+        const h = Math.max(2, Math.floor(val * 18));
+        ctx.fillStyle = b % 2 === 0 ? pal.accent_neon : pal.pixel_highlight;
+        ctx.fillRect(b * 10 + 2, groundY - h, 6, h);
+      }
+
+      // 3. Parallax Rounded Retro Platformer Hills & Bushes
+      const hillScroll = Math.floor(frameTick * 0.5);
+      ctx.fillStyle = pal.bg_secondary;
+      for (let x = 0; x < W; x += 4) {
+        const wx = x + hillScroll;
+        const hillH = Math.floor(12 + Math.max(0, Math.sin(wx * 0.035) * 18) + bass * 5);
+        ctx.fillRect(x, groundY - hillH, 4, hillH);
+      }
+
+      // 4. Floating Retro Brick / Note Platforms that bounce on bass hits
+      const platScroll = (frameTick * 0.9) % 110;
+      const bassBump = bass > 0.48 ? -3 : 0;
+      for (let p = 0; p < 4; p++) {
+        const px = Math.floor(W - ((p * 110 + platScroll) % (W + 60)) - 20);
+        const py = groundY - 38 - (p % 2) * 14 + bassBump;
+        // Draw 3 connected 10x10 retro blocks
+        for (let blk = 0; blk < 3; blk++) {
+          const bx = px + blk * 10;
+          ctx.fillStyle = blk === 1 ? pal.pixel_highlight : pal.bg_secondary;
+          ctx.fillRect(bx, py, 9, 9);
+          ctx.fillStyle = pal.accent_neon;
+          ctx.fillRect(bx, py, 9, 1);
+          ctx.fillRect(bx, py, 1, 9);
+          if (blk === 1) {
+            // Question / Note dot inside center block
+            ctx.fillStyle = "#ffffff";
+            ctx.fillRect(bx + 3, py + 3, 3, 3);
+          }
+        }
+      }
+
+      // 5. Scrolling Side-Scroller Ground (Top Turf + Checkered Brick Tiles)
+      ctx.fillStyle = pal.accent_neon;
+      ctx.fillRect(0, groundY, W, 3);
+      ctx.fillStyle = pal.pixel_highlight;
+      ctx.fillRect(0, groundY + 3, W, 2);
+
+      ctx.fillStyle = pal.bg_secondary;
+      ctx.fillRect(0, groundY + 5, W, H - (groundY + 5));
+
+      const tileOffset = Math.floor(frameTick * (1.2 + bass * 1.5)) % 16;
+      ctx.fillStyle = "#000000";
+      for (let y = groundY + 5; y < H; y += 8) {
+        ctx.fillRect(0, y, W, 1);
+        const rowShift = ((y - groundY) % 16 === 0) ? 0 : 8;
+        for (let x = -tileOffset + rowShift; x < W; x += 16) {
+          ctx.fillRect(x, y, 1, 8);
+        }
+      }
+
+      return groundY;
+    }
+
+    // -------------------------------------------------------------------------
+    // STAGE STYLE 2: CLASSIC WINAMP LED SPECTRUM + PEAK HOLD + OSCILLOSCOPE
+    // -------------------------------------------------------------------------
+    function renderWinampAnalyzerStage(pal, bass, mid, treble) {
+      const baseY = Math.floor(H * 0.66);
+
+      // 1. Classic Dark Winamp Analyzer Micro-Grid Backdrop
+      ctx.fillStyle = pal.bg_secondary;
+      for (let y = 12; y < baseY; y += 8) {
+        ctx.fillRect(0, y, W, 1);
+      }
+      for (let x = 8; x < W; x += 16) {
+        ctx.fillRect(x, 0, 1, baseY);
+      }
+
+      // 2. Upper Live Oscilloscope Waveform Ribbon
+      drawOscilloscopeWaveform(36, 18 + bass * 14, pal);
+
+      // 3. Full-Stage Segmented LED Bars + Gravity Peak-Hold Caps
+      drawWinampSegmentedBars(baseY, 64, bass, pal, true);
+
+      // 4. Base Divider Line
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, baseY, W, 1);
+
+      return baseY;
+    }
+
+    // -------------------------------------------------------------------------
+    // STAGE STYLE 3: WINAMP FIRE / DEMOSCENE PLASMA EQUALIZER
+    // -------------------------------------------------------------------------
+    function renderWinampFireStage(pal, bass, mid, treble) {
+      const centerY = Math.floor(H * 0.56);
+
+      // 1. Rising Audio-Reactive Demoscene Ember Particles
+      for (const em of fireEmbers) {
+        em.y -= em.vy * (0.8 + bass * 2.6);
+        em.x += Math.sin(frameTick * 0.08 + em.y * 0.05) * 0.5;
+        if (em.y < 8) {
+          em.y = H - 10;
+          em.x = Math.random() * W;
+        }
+        ctx.fillStyle = em.y < centerY ? pal.pixel_highlight : pal.accent_neon;
+        ctx.fillRect(Math.floor(em.x), Math.floor(em.y), em.size, em.size);
+      }
+
+      // 2. Dual Sine Plasma Wave Ribbon
+      for (let x = 0; x < W; x += 3) {
+        const py1 = Math.floor(28 + Math.sin(frameTick * 0.07 + x * 0.03) * (10 + mid * 16));
+        const py2 = Math.floor(28 + Math.cos(frameTick * 0.05 - x * 0.04) * (10 + treble * 16));
+        ctx.fillStyle = pal.accent_neon;
+        ctx.fillRect(x, py1, 2, 2);
+        ctx.fillStyle = pal.pixel_highlight;
+        ctx.fillRect(x, py2, 2, 2);
+      }
+
+      // 3. Mirrored Segmented Spectrum Bars with Peak Caps
+      drawWinampSegmentedBars(centerY, 52, bass, pal, true);
+
+      return centerY + 12;
+    }
+
+    // -------------------------------------------------------------------------
+    // STAGE STYLE 4: MIDNIGHT CITY SKYLINE & HIGHWAY CRUISER
+    // -------------------------------------------------------------------------
+    function renderCityCruiserStage(pal, bass, mid, treble) {
+      const horizonY = Math.floor(H * 0.62);
+
+      // 1. Twinkling Night Stars
+      for (const st of stars) {
+        st.x -= st.speed * 0.5;
+        if (st.x < 0) st.x = W;
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(Math.floor(st.x), Math.floor(st.y * 0.6), 1, 1);
+      }
+
+      // 2. Parallax City Skyscrapers with Audio-Reactive Lit Windows
+      const cityScroll = Math.floor(frameTick * 0.35);
+      let curX = -(cityScroll % 22);
+      let bIdx = 0;
+      while (curX < W) {
+        const b = buildings[(bIdx + Math.floor(cityScroll / 22)) % buildings.length];
+        const by = horizonY - b.h;
+        ctx.fillStyle = pal.bg_secondary;
+        ctx.fillRect(curX, by, b.w - 1, b.h);
+        ctx.fillStyle = pal.accent_neon;
+        ctx.fillRect(curX, by, b.w - 1, 1);
+
+        // Lit Pixel Windows
+        for (let wy = by + 4; wy < horizonY - 4; wy += 5) {
+          for (let wx = curX + 3; wx < curX + b.w - 4; wx += 4) {
+            const winHash = ((wx * 13 + wy * 7 + b.windowsSeed) % 11);
+            if (winHash < 5) {
+              ctx.fillStyle = (winHash === 0 && treble > 0.3) ? "#ffffff" : (winHash % 2 === 0 ? pal.accent_neon : pal.pixel_highlight);
+              ctx.fillRect(wx, wy, 2, 3);
+            }
+          }
+        }
+        curX += 22;
+        bIdx++;
+      }
+
+      // 3. Segmented Horizon Equalizer Overlay
+      drawWinampSegmentedBars(horizonY, 32, bass, pal, false);
+
+      // 4. Midnight Highway with Scrolling Lane Dashes
+      ctx.fillStyle = pal.bg_secondary;
+      ctx.fillRect(0, horizonY, W, H - horizonY);
+      ctx.fillStyle = pal.pixel_highlight;
+      ctx.fillRect(0, horizonY, W, 2);
+
+      const laneScroll = Math.floor(frameTick * (1.8 + bass * 2.0)) % 24;
+      ctx.fillStyle = "#ffffff";
+      for (let x = -laneScroll; x < W; x += 24) {
+        ctx.fillRect(x, horizonY + 14, 12, 2);
+      }
+
+      return horizonY;
+    }
+
+    // -------------------------------------------------------------------------
+    // STAGE STYLE 5: 80s OUTRUN SYNTH SUN & PERSPECTIVE CYBER GRID
+    // -------------------------------------------------------------------------
+    function renderSynthGridStage(pal, bass, mid, treble) {
+      const horizonY = Math.floor(H * 0.62);
+
+      // 1. Parallax Starfield
+      for (const st of stars) {
+        st.x -= st.speed * (1 + bass * 2.2);
+        if (st.x < 0) {
+          st.x = W;
+          st.y = Math.random() * (H * 0.62);
+        }
+        ctx.fillStyle = (treble > 0.38 && Math.random() > 0.5) ? pal.accent_neon : "#ffffff";
+        ctx.fillRect(Math.floor(st.x), Math.floor(st.y), st.size, st.size);
+      }
+
+      // 2. Retro Pulsing Segmented Synth Sun
+      const sunRadius = Math.floor(22 + bass * 12);
+      const sunCenterX = Math.floor(W * 0.42);
+      const sunCenterY = horizonY - 6;
+
+      for (let y = -sunRadius; y <= 6; y++) {
+        if ((y + Math.floor(frameTick * 0.15)) % 4 === 0 && y > 0) continue;
+        const halfWidth = Math.floor(Math.sqrt(Math.max(0, sunRadius * sunRadius - y * y)));
+        ctx.fillStyle = y < -4 ? pal.pixel_highlight : pal.accent_neon;
+        ctx.fillRect(sunCenterX - halfWidth, sunCenterY + y, halfWidth * 2, 1);
+      }
+
+      // 3. Pixelated Mountain Silhouette
+      ctx.fillStyle = pal.bg_secondary;
+      for (let x = 0; x < W; x += 4) {
+        const mHeight = Math.floor(
+          10 +
+          Math.sin((x + frameTick * 0.4) * 0.045) * 8 +
+          Math.cos((x - frameTick * 0.2) * 0.09) * 5 +
+          bass * 8
+        );
+        ctx.fillRect(x, horizonY - mHeight, 4, mHeight);
+      }
+
+      // 4. Perspective Cyber Grid Floor
+      ctx.fillStyle = pal.bg_secondary;
+      ctx.fillRect(0, horizonY, W, H - horizonY);
+      ctx.fillStyle = pal.accent_neon;
+      ctx.fillRect(0, horizonY, W, 2);
+
+      const gridOffset = (frameTick * (0.6 + bass * 1.4)) % 10;
+      for (let i = 1; i <= 7; i++) {
+        const yPos = horizonY + Math.floor(Math.pow(i + gridOffset / 10, 1.75) * 2.4);
+        if (yPos < H) {
+          ctx.fillStyle = i % 2 === 0 ? pal.accent_neon : pal.pixel_highlight;
+          ctx.fillRect(0, yPos, W, 1);
+        }
+      }
+
+      for (let x = -W; x <= W * 2; x += 28) {
+        const topX = sunCenterX + (x - sunCenterX) * 0.18;
+        ctx.strokeStyle = pal.accent_neon;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(Math.floor(topX), horizonY);
+        ctx.lineTo(Math.floor(x), H);
+        ctx.stroke();
+      }
+
+      // 5. Segmented Horizon Equalizer with Peak Caps
+      drawWinampSegmentedBars(horizonY, 36, bass, pal, false);
+
+      return horizonY;
+    }
+
+    function renderArcadeCanvas() {
+      frameTick++;
+      const { bass, mid, treble } = getAudioEnergy();
+      const pal = (currentScene && currentScene.palette) ? currentScene.palette : {
+        bg_primary: "#090518",
+        bg_secondary: "#1d1138",
+        accent_neon: "#00f5d4",
+        pixel_highlight: "#ff2a85"
+      };
+
+      const colorLookup = {
+        1: pal.bg_secondary,
+        2: pal.accent_neon,
+        3: pal.pixel_highlight,
+        4: "#ffffff"
+      };
+
+      // Clear primary background
+      ctx.fillStyle = pal.bg_primary;
+      ctx.fillRect(0, 0, W, H);
+
+      const sprites = (currentScene && Array.isArray(currentScene.sprites) && currentScene.sprites.length > 0)
+        ? currentScene.sprites
+        : [];
+
+      const activeStyle = resolveActiveVizStyle(sprites);
+      let horizonY = Math.floor(H * 0.62);
+
+      if (activeStyle === 'side_scroller') {
+        horizonY = renderSideScrollerStage(pal, bass, mid, treble);
+      } else if (activeStyle === 'winamp_analyzer') {
+        horizonY = renderWinampAnalyzerStage(pal, bass, mid, treble);
+      } else if (activeStyle === 'winamp_fire') {
+        horizonY = renderWinampFireStage(pal, bass, mid, treble);
+      } else if (activeStyle === 'city_cruiser') {
+        horizonY = renderCityCruiserStage(pal, bass, mid, treble);
+      } else {
+        horizonY = renderSynthGridStage(pal, bass, mid, treble);
+      }
+
+      // Render AI-Generated Custom 8-Bit Sprites adapted to the active stage!
+      for (let i = 0; i < spriteActors.length; i++) {
+        if (sprites.length === 0) break;
+        const actor = spriteActors[i];
+        const spriteDef = sprites[i % sprites.length];
+        const behavior = spriteDef.behavior || 'bounce';
+        const scale = 2;
+        let drawX = actor.x;
+        let drawY = actor.y;
+        let flipX = false;
+
+        if (activeStyle === 'side_scroller' && (behavior === 'dancers' || behavior === 'scroll' || behavior === 'bounce')) {
+          // In Side-Scroller mode, characters run and jump along the platformer ground!
+          actor.x += Math.abs(actor.vx) * (1.1 + bass * 1.6);
+          if (actor.x > W + 16) actor.x = -32;
+          drawX = actor.x;
+          const jumpArc = Math.floor(Math.abs(Math.sin(frameTick * 0.11 + i * 1.3)) * (10 + bass * 24));
+          drawY = (horizonY - 32) - jumpArc;
+          flipX = false;
+        } else if (behavior === 'bounce') {
+          actor.x += actor.vx * (1 + bass * 1.5);
+          if (actor.x < 12 || actor.x > W - 44) actor.vx *= -1;
+          drawX = actor.x;
+          drawY = (horizonY - 38) - Math.abs(Math.sin(frameTick * 0.09 + actor.phase)) * (18 + bass * 28);
+          flipX = actor.vx < 0;
+        } else if (behavior === 'scroll') {
+          actor.x -= (1.1 + bass * 2.4);
+          if (actor.x < -36) actor.x = W + 20;
+          drawX = actor.x;
+          drawY = horizonY - 26 + Math.sin(frameTick * 0.12 + actor.phase) * 3;
+        } else if (behavior === 'rain') {
+          actor.y += (1.0 + treble * 2.5);
+          if (actor.y > H - 20) {
+            actor.y = -24;
+            actor.x = (actor.x + 53) % (W - 32);
+          }
+          drawX = actor.x;
+          drawY = actor.y;
+        } else if (behavior === 'dancers') {
+          drawX = 28 + i * 36;
+          const jump = Math.floor(Math.abs(Math.sin(frameTick * 0.15 + i)) * (8 + bass * 22));
+          drawY = horizonY - 28 - jump;
+          flipX = Math.floor(frameTick / 15 + i) % 2 === 0;
+        } else {
+          // 'float' or 'starfield'
+          drawX = actor.x + Math.sin(frameTick * 0.04 + actor.phase) * 18;
+          drawY = 20 + (i * 16) % Math.max(24, horizonY - 45) + Math.cos(frameTick * 0.06 + actor.phase) * (8 + mid * 14);
+        }
+
+        drawPixelMatrix(spriteDef.matrix, drawX, drawY, scale, colorLookup, flipX);
+      }
+
+      requestAnimationFrame(renderArcadeCanvas);
+    }
+
+    requestAnimationFrame(renderArcadeCanvas);
+
+    // =========================================================================
+    // 4. HUD RENDERING & WEBSOCKET TELEMETRY SYNC
+    // =========================================================================
+    function updateStageHeader() {
+      if (!currentScene) return;
+      document.getElementById('stageTitle').textContent = currentScene.stage_title || "STAGE 01: 8-BIT ARENA";
+      const tickerEl = document.getElementById('flavorTicker');
+      if (tickerEl) {
+        tickerEl.textContent =
+          `*** ${currentScene.stage_title} *** ${currentScene.flavor_text} *** SCAN QR CODE TO VOTE & DROP SONGS! ***`;
+      }
+      const isAi = String(currentScene.source || '').startsWith('gemini');
+      const srcTag = isAi ? '[GEMINI AI]' : '[8-BIT]';
+      document.getElementById('sceneSourceTag').textContent = srcTag;
+    }
+
+    function renderHUD(state) {
+      appState = state;
+
+      // Telemetry
+      if (state.telemetry) {
+        const djs = String(state.telemetry.active_djs || 0).padStart(2, '0');
+        document.getElementById('telemetryDjs').textContent = djs;
+      }
+
+      // Public URL & QR
+      if (state.public_url) {
+        const lbl = document.getElementById('publicUrlLabel');
+        const cleanLabel = state.public_url.replace(/^https?:\/\//, '');
+        if (lbl.textContent !== cleanLabel) {
+          lbl.textContent = cleanLabel;
+          document.getElementById('qrCodeImg').src = `/api/qrcode?url=${encodeURIComponent(state.public_url)}&t=${Date.now()}`;
+        }
+      }
+
+      // Now Playing
+      const np = state.now_playing;
+      if (np) {
+        document.getElementById('nowPlayingTitle').textContent = np.title;
+        document.getElementById('nowPlayingArtist').textContent = np.artist;
+        document.getElementById('nowPlayingSeedBadge').textContent =
+          np.is_seed ? "AUTO-DJ // SEED POOL" : `DJ: ${np.requested_by_name}`;
+        document.getElementById('bufferStatusBadge').textContent =
+          np.audio_ready ? "[EBU R128 READY]" : "[NORMALIZING...]";
+
+        if (np.scene) {
+          currentScene = np.scene;
+          applyPalette(currentScene.palette);
+          updateStageHeader();
+        }
+
+        if (activeVideoId !== np.video_id && !isCrossfading) {
+          loadAndPlayOnActiveDeck(np);
+        }
+      }
+
+      // Preload Next Up Track onto the inactive deck
+      if (state.next_up_track) {
+        preloadNextDeck(state.next_up_track);
+      }
+
+      // Up Next Queue (Top 5)
+      const q = state.queue || [];
+      document.getElementById('queueCountBadge').textContent = `${q.length} IN QUEUE`;
+      const upNextEl = document.getElementById('upNextList');
+      if (q.length === 0) {
+        upNextEl.innerHTML = `
+          <div class="p-4 border-2 border-dashed border-gray-700 text-center">
+            <div class="text-xs xl:text-sm text-amber-300 mb-2">USER QUEUE EMPTY // AUTO-DJ ACTIVE</div>
+            <div class="text-[11px] xl:text-xs text-gray-300 leading-relaxed">
+              NEXT SEED: ${state.next_up_track ? state.next_up_track.title + ' - ' + state.next_up_track.artist : 'ROTATING SEED POOL'}
+            </div>
+          </div>
+        `;
+      } else {
+        upNextEl.innerHTML = q.slice(0, 7).map((item, idx) => `
+          <div class="p-3 bg-black/75 border-2 ${idx === 0 ? 'border-emerald-400' : 'border-gray-700'} flex items-center justify-between gap-3">
+            <div class="min-w-0 flex-1">
+              <div class="flex items-center gap-2.5 mb-1.5">
+                <span class="text-[11px] px-2 py-0.5 ${idx === 0 ? 'bg-emerald-400 text-black' : 'bg-gray-800 text-gray-200'} shrink-0">
+                  #${idx + 1}
+                </span>
+                <span class="text-xs xl:text-sm text-white truncate">${item.title}</span>
+              </div>
+              <div class="text-[10px] xl:text-xs text-gray-300 truncate">
+                ${item.artist} // DJ: <span class="text-amber-300">${item.requested_by_name}</span>
+                ${idx === 0 && item.audio_ready ? '<span class="text-emerald-400 ml-1">[READY]</span>' : ''}
+              </div>
+            </div>
+            <div class="px-3 py-1.5 bg-pink-600/30 border-2 border-pink-500 text-center shrink-0">
+              <div class="text-sm xl:text-base highlight-text">${item.votes}</div>
+              <div class="text-[8px] xl:text-[9px] text-gray-200">VOTES</div>
+            </div>
+          </div>
+        `).join('');
+      }
+
+      // Leaderboard
+      const lb = state.leaderboard || [];
+      const lbEl = document.getElementById('leaderboardList');
+      if (lb.length === 0) {
+        lbEl.innerHTML = `<div class="text-[11px] text-gray-400 py-2">NO DJ WINS RECORDED YET. REQUEST A TRACK!</div>`;
+      } else {
+        lbEl.innerHTML = lb.slice(0, 4).map((u, idx) => `
+          <div class="flex items-center justify-between py-1.5 border-b border-gray-800 gap-2">
+            <div class="truncate">
+              <span class="text-amber-400 mr-1">${idx + 1}.</span>
+              <span class="text-white">${u.username}</span>
+            </div>
+            <div class="neon-text shrink-0">${u.wins}W / ${u.votes_cast}V</div>
+          </div>
+        `).join('');
+      }
+    }
+
+    function handleHostTransportControl(msg) {
+      if (msg.control === 'set_viz_mode' && msg.viz_mode) {
+        setVizModeById(msg.viz_mode);
+        return;
+      }
+      ensureAudioUnlocked();
+      const { currentEl } = getDeckElements();
+      if (!currentEl) return;
+
+      const control = msg.control;
+      const delta = Number(msg.seconds || 15);
+
+      if (control === 'toggle_pause') {
+        if (currentEl.paused) {
+          currentEl.play().catch(() => {});
+          document.getElementById('activeDeckBadge').textContent = `DECK ${activeDeck} [LIVE]`;
+        } else {
+          currentEl.pause();
+          document.getElementById('activeDeckBadge').textContent = `DECK ${activeDeck} [PAUSED]`;
+        }
+      } else if (control === 'seek_ff') {
+        if (currentEl.duration && !isNaN(currentEl.duration)) {
+          currentEl.currentTime = Math.min( Math.max(0, currentEl.duration - 1), currentEl.currentTime + delta );
+        }
+      } else if (control === 'seek_rw') {
+        currentEl.currentTime = Math.max(0, currentEl.currentTime - delta);
+      } else if (control === 'restart_track') {
+        currentEl.currentTime = 0;
+        if (currentEl.paused) currentEl.play().catch(() => {});
+      }
+    }
+
+    function toggleHostModal(forceState = null) {
+      const modal = document.getElementById('hostOverlayModal');
+      const iframe = document.getElementById('hostModalIframe');
+      const isHidden = modal.classList.contains('hidden');
+      const shouldOpen = forceState !== null ? forceState : isHidden;
+
+      if (shouldOpen) {
+        if (iframe.src === 'about:blank' || !iframe.src.includes('/host')) {
+          iframe.src = '/host';
+        }
+        modal.classList.remove('hidden');
+      } else {
+        modal.classList.add('hidden');
+      }
+    }
+
+    window.addEventListener('message', (e) => {
+      if (e.data && e.data.type === 'set_viz_mode' && e.data.viz_mode) {
+        setVizModeById(e.data.viz_mode);
+      }
+    });
+
+    document.addEventListener('keydown', (e) => {
+      ensureAudioUnlocked();
+      if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
+      if (e.key === 'Escape') {
+        toggleHostModal(false);
+      } else if (e.key === 'h' || e.key === 'H') {
+        toggleHostModal();
+      } else if (e.key === 'v' || e.key === 'V') {
+        cycleVizMode();
+      }
+    });
+
+    // WebSocket auto-reconnect loop
+    let ws = null;
+    function connectBigScreenWS() {
+      const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+      ws = new WebSocket(`${proto}//${location.host}/ws?role=bigscreen&client_id=bigscreen_tv`);
+
+      ws.onopen = () => {
+        document.getElementById('wsDot').className = 'inline-block w-3 h-3 bg-emerald-400 shrink-0';
+        document.getElementById('wsStatusText').textContent = 'ONLINE';
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+          if (msg.type === 'state_sync') {
+            renderHUD(msg);
+          } else if (msg.type === 'host_veto_crossfade') {
+            triggerSixSecondCrossfade(msg.now_playing, false);
+          } else if (msg.type === 'host_transport_control') {
+            handleHostTransportControl(msg);
+          }
+        } catch (e) {
+          console.error("WS parse error:", e);
+        }
+      };
+
+      ws.onclose = () => {
+        document.getElementById('wsDot').className = 'inline-block w-3 h-3 bg-red-500';
+        document.getElementById('wsStatusText').textContent = 'RECONNECTING...';
+        setTimeout(connectBigScreenWS, 2000);
+      };
+    }
+
+    connectBigScreenWS();
+  </script>
+</body>
+</html>
