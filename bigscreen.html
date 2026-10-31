@@ -1315,12 +1315,11 @@
         lbEl.innerHTML = `<div class="text-[11px] text-gray-400 py-2">NO DJ WINS RECORDED YET. REQUEST A TRACK!</div>`;
       } else {
         lbEl.innerHTML = lb.slice(0, 4).map((u, idx) => `
-          <div class="flex items-center justify-between py-1.5 border-b border-gray-800 gap-2">
-            <div class="truncate">
-              <span class="text-amber-400 mr-1">${idx + 1}.</span>
+          <div class="flex items-center py-1.5 border-b border-gray-800 min-w-0">
+            <div class="truncate w-full">
+              <span class="text-amber-400 mr-1.5">${idx + 1}.</span>
               <span class="text-white">${u.username}</span>
             </div>
-            <div class="neon-text shrink-0">${u.wins}W / ${u.votes_cast}V</div>
           </div>
         `).join('');
       }
