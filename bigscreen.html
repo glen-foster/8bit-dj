@@ -102,8 +102,8 @@
     }
 
     @keyframes marqueeScroll {
-      0% { transform: translateX(100%); }
-      100% { transform: translateX(-100%); }
+      0% { transform: translateX(0); }
+      100% { transform: translateX(-50%); }
     }
 
     .ticker-wrap {
@@ -112,9 +112,14 @@
     }
 
     .ticker-move {
+      display: inline-flex;
+      width: max-content;
+      animation: marqueeScroll 24s linear infinite;
+    }
+
+    .ticker-item {
       display: inline-block;
-      padding-left: 20%;
-      animation: marqueeScroll 22s linear infinite;
+      padding-right: 3.5rem;
     }
 
     @keyframes blinkSlow {
@@ -175,11 +180,16 @@
   <div class="hud-layer">
     <!-- Left Column (col-span-7): Top Title Bar + Open 8-Bit Stage Window + Bottom Now Playing Card -->
     <section class="col-span-7 flex flex-col justify-between gap-4 min-h-0 min-w-0">
-      <!-- Top Box: Full-Width Stage Title & Scrolling RPG Marquee Bar -->
+      <!-- Top Box: Full-Width Stage Title & Continuous Scrolling RPG Marquee Bar -->
       <header class="pixel-box-highlight px-4 py-3 flex items-center min-w-0 shrink-0 overflow-hidden">
         <div class="ticker-wrap w-full min-w-0 text-xs xl:text-sm highlight-text">
           <div id="flavorTicker" class="ticker-move">
-            *** STAGE 01: NEON SYNTHWAVE ARENA *** WELCOME TO THE 8-BIT JUKEBOX! SCAN THE QR CODE TO VOTE OR DROP TRACKS! ***
+            <span id="flavorTickerCopyA" class="ticker-item">
+              *** STAGE 01: NEON SYNTHWAVE ARENA *** WELCOME TO THE 8-BIT JUKEBOX! SCAN THE QR CODE TO VOTE OR DROP TRACKS! ***
+            </span>
+            <span id="flavorTickerCopyB" class="ticker-item" aria-hidden="true">
+              *** STAGE 01: NEON SYNTHWAVE ARENA *** WELCOME TO THE 8-BIT JUKEBOX! SCAN THE QR CODE TO VOTE OR DROP TRACKS! ***
+            </span>
           </div>
         </div>
         <span id="stageTitle" class="hidden">STAGE 01: NEON SYNTHWAVE ARENA</span>
@@ -1220,10 +1230,12 @@
     function updateStageHeader() {
       if (!currentScene) return;
       document.getElementById('stageTitle').textContent = currentScene.stage_title || "STAGE 01: 8-BIT ARENA";
-      const tickerEl = document.getElementById('flavorTicker');
-      if (tickerEl) {
-        tickerEl.textContent =
-          `*** ${currentScene.stage_title} *** ${currentScene.flavor_text} *** SCAN QR CODE TO VOTE & DROP SONGS! ***`;
+      const msgText = `*** ${currentScene.stage_title} *** ${currentScene.flavor_text} *** SCAN QR CODE TO VOTE & DROP SONGS! ***`;
+      const copyA = document.getElementById('flavorTickerCopyA');
+      const copyB = document.getElementById('flavorTickerCopyB');
+      if (copyA && copyB) {
+        copyA.textContent = msgText;
+        copyB.textContent = msgText;
       }
       const isAi = String(currentScene.source || '').startsWith('gemini');
       const srcTag = isAi ? '[GEMINI AI]' : '[8-BIT]';
