@@ -188,22 +188,20 @@
 
       <!-- Bottom Box: Now Playing + System Status + Dual-Deck Telemetry -->
       <div class="pixel-box p-5 min-w-0 shrink-0">
-        <div class="flex flex-wrap items-center justify-between gap-2 mb-3 min-w-0">
-          <div class="flex items-center gap-2.5 min-w-0">
-            <span class="px-2.5 py-1.5 bg-pink-600 text-white text-[10px] xl:text-xs blink-arcade shrink-0">NOW PLAYING</span>
-            <span id="nowPlayingSeedBadge" class="text-[10px] xl:text-xs text-amber-300 truncate">REQ BY: 8BIT_AUTODJ</span>
+        <div class="flex items-center justify-between gap-2 mb-3 min-w-0 flex-nowrap">
+          <div class="flex items-center gap-2 min-w-0 flex-1">
+            <span class="px-2 py-1 bg-pink-600 text-white text-[9px] xl:text-[10px] blink-arcade shrink-0">NOW PLAYING</span>
+            <span id="nowPlayingSeedBadge" class="text-[9px] xl:text-[11px] text-amber-300 truncate">AUTO-DJ</span>
           </div>
-          <div class="flex items-center gap-2.5 shrink-0">
+          <div class="flex items-center gap-2 shrink-0 text-[9px] xl:text-[10px]">
             <div class="flex items-center gap-1.5 pr-2 border-r border-gray-700">
               <span id="wsDot" class="inline-block w-2.5 h-2.5 bg-emerald-400 shrink-0"></span>
-              <span id="wsStatusText" class="text-[9px] xl:text-[10px] neon-text">ONLINE</span>
+              <span id="wsStatusText" class="neon-text">ONLINE</span>
             </div>
-            <span id="activeDeckBadge" class="text-[10px] xl:text-xs neon-text">DECK A [LIVE]</span>
-            <span id="crossfadeBadge" class="px-2 py-1 border border-gray-600 text-[9px] xl:text-[10px] text-gray-300">
-              EBU R128
-            </span>
-            <span id="bufferStatusBadge" class="text-[9px] xl:text-[10px] text-emerald-400">
-              [READY]
+            <span id="activeDeckBadge" class="neon-text">DECK A [LIVE]</span>
+            <span id="crossfadeBadge" class="hidden">EBU R128</span>
+            <span id="bufferStatusBadge" class="text-emerald-400">
+              [R128 READY]
             </span>
           </div>
         </div>
@@ -796,6 +794,28 @@
     function drawPixelMatrix(matrix, startX, startY, scale, paletteColors, flipX = false) {
       if (!Array.isArray(matrix)) return;
       const rows = matrix.length;
+      const baseX = Math.round(startX);
+      const baseY = Math.round(startY);
+
+      // Pass 1: High-contrast outer black border + subtle white rim so sprites pop off any background!
+      for (let r = 0; r < rows; r++) {
+        const row = matrix[r];
+        if (!Array.isArray(row)) continue;
+        const cols = row.length;
+        for (let c = 0; c < cols; c++) {
+          const colorIdx = row[flipX ? (cols - 1 - c) : c];
+          if (!colorIdx || colorIdx <= 0) continue;
+          const px = baseX + c * scale;
+          const py = baseY + r * scale;
+          // Outer white/neon halo + inner black cut-out outline
+          ctx.fillStyle = "rgba(255, 255, 255, 0.35)";
+          ctx.fillRect(px - 2, py - 2, scale + 4, scale + 4);
+          ctx.fillStyle = "#000000";
+          ctx.fillRect(px - 1, py - 1, scale + 2, scale + 2);
+        }
+      }
+
+      // Pass 2: Crisp foreground sprite pixels at 100% brightness
       for (let r = 0; r < rows; r++) {
         const row = matrix[r];
         if (!Array.isArray(row)) continue;
@@ -805,8 +825,8 @@
           if (!colorIdx || colorIdx <= 0) continue;
           ctx.fillStyle = paletteColors[colorIdx] || '#ffffff';
           ctx.fillRect(
-            Math.round(startX + c * scale),
-            Math.round(startY + r * scale),
+            baseX + c * scale,
+            baseY + r * scale,
             scale,
             scale
           );
@@ -1097,7 +1117,7 @@
       };
 
       const colorLookup = {
-        1: pal.bg_secondary,
+        1: "#070510",
         2: pal.accent_neon,
         3: pal.pixel_highlight,
         4: "#ffffff"
@@ -1114,6 +1134,9 @@
       const activeStyle = resolveActiveVizStyle(sprites);
       let horizonY = Math.floor(H * 0.62);
 
+      // Render background stage slightly muted so foreground pixel art sprites pop with high contrast
+      ctx.save();
+      ctx.globalAlpha = 0.62;
       if (activeStyle === 'side_scroller') {
         horizonY = renderSideScrollerStage(pal, bass, mid, treble);
       } else if (activeStyle === 'winamp_analyzer') {
@@ -1125,6 +1148,11 @@
       } else {
         horizonY = renderSynthGridStage(pal, bass, mid, treble);
       }
+      ctx.restore();
+
+      // Subtle atmospheric depth veil separating background visualizer from foreground sprites
+      ctx.fillStyle = "rgba(4, 2, 12, 0.28)";
+      ctx.fillRect(0, 0, W, H);
 
       // Render AI-Generated Custom 8-Bit Sprites adapted to the active stage!
       for (let i = 0; i < spriteActors.length; i++) {
@@ -1224,9 +1252,9 @@
         document.getElementById('nowPlayingTitle').textContent = np.title;
         document.getElementById('nowPlayingArtist').textContent = np.artist;
         document.getElementById('nowPlayingSeedBadge').textContent =
-          np.is_seed ? "AUTO-DJ // SEED POOL" : `DJ: ${np.requested_by_name}`;
+          np.is_seed ? "AUTO-DJ" : `DJ: ${np.requested_by_name}`;
         document.getElementById('bufferStatusBadge').textContent =
-          np.audio_ready ? "[EBU R128 READY]" : "[NORMALIZING...]";
+          np.audio_ready ? "[R128 READY]" : "[BUFFERING]";
 
         if (np.scene) {
           currentScene = np.scene;
