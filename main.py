@@ -21,12 +21,13 @@ from typing import Any, Dict, List, Optional
 import qrcode
 from dotenv import load_dotenv
 from fastapi import FastAPI, Header, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from pydantic import BaseModel
 
 import ai_scene_generator
 import audio_engine
 import database
+import wifi_manager
 
 load_dotenv()
 
@@ -197,6 +198,7 @@ def build_full_state(client_id: Optional[str] = None, include_host: bool = False
         "type": "state_sync",
         "server_time": time.time(),
         "public_url": get_public_mobile_url(),
+        "wifi_status": wifi_manager.get_wifi_status(),
         "now_playing": enriched_now,
         "next_up_track": next_up_track,
         "queue": queue,
@@ -247,7 +249,9 @@ async def lifespan(app: FastAPI):
     prefetch_engine = audio_engine.AudioPrefetchEngine(on_state_change=broadcast_state)
     await prefetch_engine.start()
     tunnel_task = asyncio.create_task(start_public_tunnel())
+    wifi_task = asyncio.create_task(wifi_manager.wifi_watchdog_loop(on_state_change=broadcast_state))
     yield
+    wifi_task.cancel()
     tunnel_task.cancel()
     if _tunnel_proc and _tunnel_proc.returncode is None:
         try:
@@ -294,17 +298,117 @@ class HostActionRequest(BaseModel):
     seconds: Optional[int] = 15
 
 
+class WifiConnectRequest(BaseModel):
+    ssid: str
+    password: str = ""
+    pin: Optional[str] = None
+
+
+class WifiHotspotActionRequest(BaseModel):
+    pin: str
+    enable: bool = True
+
+
 def verify_host_pin(pin: Optional[str]) -> None:
     if not pin or pin.strip() != HOST_PIN:
         raise HTTPException(status_code=403, detail="INVALID HOST PIN! ACCESS DENIED.")
+
+
+# --- Captive Portal Middleware & Routes (Hotel-Style Wi-Fi Pop-Up) ---
+CAPTIVE_PORTAL_PATHS = {
+    "/hotspot-detect.html",
+    "/library/test/success.html",
+    "/generate_204",
+    "/gen_204",
+    "/ncsi.txt",
+    "/connecttest.txt",
+    "/redirect",
+    "/canonical.html",
+    "/success.txt",
+}
+
+
+@app.middleware("http")
+async def captive_portal_intercept_middleware(request: Request, call_next):
+    path = request.url.path
+    host_hdr = (request.headers.get("host") or "").split(":")[0].lower()
+
+    # 1. Explicit OS captive portal probe paths -> redirect to our 8-Bit Wi-Fi Setup page
+    if path in CAPTIVE_PORTAL_PATHS:
+        return RedirectResponse(url=f"http://{wifi_manager.HOTSPOT_IP}:{PORT}/wifi-setup", status_code=302)
+
+    # 2. Any wildcard DNS domain intercepted while phone is on 8BIT-JUKEBOX-SETUP hotspot
+    is_local_or_tunnel = (
+        not host_hdr
+        or host_hdr in ("localhost", "127.0.0.1", wifi_manager.HOTSPOT_IP)
+        or host_hdr.startswith("192.168.")
+        or host_hdr.startswith("10.")
+        or host_hdr.endswith(".local")
+        or host_hdr.endswith(".lhr.life")
+    )
+    if not is_local_or_tunnel and not path.startswith("/api/"):
+        return RedirectResponse(url=f"http://{wifi_manager.HOTSPOT_IP}:{PORT}/wifi-setup", status_code=302)
+
+    return await call_next(request)
 
 
 # --- Frontend HTML Routes ---
 @app.get("/", response_class=HTMLResponse)
 @app.get("/mobile", response_class=HTMLResponse)
 @app.get("/mobile.html", response_class=HTMLResponse)
-async def serve_mobile() -> FileResponse:
+async def serve_mobile(request: Request) -> Response:
+    # If the Pi is currently in Wi-Fi Setup Hotspot mode and the user visits "/", show Wi-Fi Setup
+    if request.url.path == "/":
+        st = wifi_manager.get_wifi_status()
+        if st.get("hotspot_active"):
+            return FileResponse(BASE_DIR / "wifi_setup.html")
     return FileResponse(BASE_DIR / "mobile.html")
+
+
+@app.get("/wifi-setup", response_class=HTMLResponse)
+@app.get("/wifi_setup.html", response_class=HTMLResponse)
+async def serve_wifi_setup() -> FileResponse:
+    return FileResponse(BASE_DIR / "wifi_setup.html")
+
+
+# --- Wi-Fi & Hotspot API ---
+@app.get("/api/wifi/networks")
+async def api_wifi_networks(rescan: int = Query(default=0)) -> Dict[str, Any]:
+    status = await asyncio.to_thread(wifi_manager.get_wifi_status)
+    networks = await asyncio.to_thread(wifi_manager.scan_wifi_networks, bool(rescan))
+    return {"ok": True, "status": status, "networks": networks}
+
+
+@app.post("/api/wifi/connect")
+async def api_wifi_connect(req: WifiConnectRequest) -> Dict[str, Any]:
+    global _tunnel_url, _tunnel_proc
+    st = await asyncio.to_thread(wifi_manager.get_wifi_status)
+    # Require Host PIN only when not in captive-portal hotspot mode
+    if not st.get("hotspot_active"):
+        verify_host_pin(req.pin)
+
+    res = await asyncio.to_thread(wifi_manager.connect_to_wifi, req.ssid, req.password)
+    if res.get("ok"):
+        # Restart public HTTPS tunnel so it binds immediately over the new Wi-Fi connection
+        _tunnel_url = None
+        if _tunnel_proc and _tunnel_proc.returncode is None:
+            try:
+                _tunnel_proc.terminate()
+            except Exception:
+                pass
+    await broadcast_state()
+    return res
+
+
+@app.post("/api/wifi/hotspot")
+async def api_wifi_hotspot(req: WifiHotspotActionRequest) -> Dict[str, Any]:
+    verify_host_pin(req.pin)
+    if req.enable:
+        res = await asyncio.to_thread(wifi_manager.start_setup_hotspot)
+    else:
+        res = await asyncio.to_thread(wifi_manager.stop_setup_hotspot)
+    await broadcast_state()
+    return res
 
 
 @app.get("/bigscreen", response_class=HTMLResponse)
@@ -429,7 +533,7 @@ async def serve_normalized_audio(video_id: str) -> FileResponse:
     """
     cached = audio_engine.get_cached_audio_path(video_id)
     if not cached and prefetch_engine:
-        cached = await prefetch_engine.ensure_track_buffered(video_id)
+        cached = await prefetch_engine.ensure_track_buffered(video_id, wait_if_inflight=True)
     if not cached or not cached.exists():
         raise HTTPException(status_code=404, detail="Normalized audio not available")
 
@@ -465,6 +569,16 @@ async def api_advance_track() -> Dict[str, Any]:
 async def api_host_verify(req: HostPinVerifyRequest) -> Dict[str, Any]:
     verify_host_pin(req.pin)
     return {"ok": True, "state": build_full_state(include_host=True)}
+
+
+@app.get("/api/host/search_playlists")
+async def api_host_search_playlists(
+    q: str = Query(..., min_length=1),
+    pin: Optional[str] = Query(default=None),
+) -> Dict[str, Any]:
+    verify_host_pin(pin)
+    results = await asyncio.to_thread(audio_engine.search_playlists_ytmusic, q, 8)
+    return {"ok": True, "results": results}
 
 
 @app.post("/api/host/action")
@@ -534,6 +648,20 @@ async def api_host_action(req: HostActionRequest) -> Dict[str, Any]:
             }
         )
         return {"ok": True, "message": f"BIG SCREEN VISUALIZER SET TO: {viz_mode.upper()}"}
+
+    elif req.action.startswith("set_volume:"):
+        try:
+            vol_pct = int(req.action.split(":", 1)[1].strip())
+        except ValueError:
+            vol_pct = 150
+        await ws_manager.broadcast_json(
+            {
+                "type": "host_transport_control",
+                "control": "set_volume",
+                "volume_pct": vol_pct,
+            }
+        )
+        return {"ok": True, "message": f"TV MASTER VOLUME BOOST SET TO: {vol_pct}%"}
 
     elif req.action == "clear_scene_cache":
         cleared = database.clear_all_cached_scenes()

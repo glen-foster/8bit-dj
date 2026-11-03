@@ -98,11 +98,54 @@ def search_ytmusic(query: str, limit: int = 12) -> List[Dict[str, Any]]:
     return matches[:limit]
 
 
+def search_playlists_ytmusic(query: str, limit: int = 8) -> List[Dict[str, Any]]:
+    """Searches YouTube Music for community/featured playlists matching `query`."""
+    if not query or not query.strip() or _ytmusic is None:
+        return []
+    results: List[Dict[str, Any]] = []
+    seen_ids = set()
+    for filter_type in ("community_playlists", "featured_playlists"):
+        try:
+            raw = _ytmusic.search(query.strip(), filter=filter_type, limit=limit)
+            for item in raw:
+                browse_id = item.get("browseId") or ""
+                if not browse_id or browse_id in seen_ids:
+                    continue
+                seen_ids.add(browse_id)
+                # Strip leading 'VL' if present so get_playlist accepts either
+                clean_id = browse_id[2:] if browse_id.startswith("VL") else browse_id
+                thumbs = item.get("thumbnails") or []
+                thumb_url = thumbs[-1].get("url", "") if thumbs else ""
+                author = item.get("author")
+                if isinstance(author, list):
+                    author_str = ", ".join(a.get("name", "") for a in author if isinstance(a, dict))
+                elif isinstance(author, str):
+                    author_str = author
+                else:
+                    author_str = "YouTube Music"
+                results.append(
+                    {
+                        "playlist_id": clean_id,
+                        "title": item.get("title", "Untitled Playlist"),
+                        "author": author_str or "YouTube Music",
+                        "item_count": str(item.get("itemCount") or ""),
+                        "thumbnail": thumb_url,
+                    }
+                )
+                if len(results) >= limit:
+                    return results
+        except Exception as exc:
+            logger.warning(f"Playlist search warning ({filter_type}) for '{query}': {exc}")
+    return results
+
+
 def load_playlist_from_ytmusic(playlist_id: str, limit: int = 50) -> List[Dict[str, Any]]:
     """Loads tracks from a YouTube Music playlist ID to populate the Host Seed Playlist."""
     clean_id = playlist_id.strip()
     if "list=" in clean_id:
         clean_id = clean_id.split("list=")[-1].split("&")[0]
+    if clean_id.startswith("VL") and len(clean_id) > 4:
+        clean_id = clean_id[2:]
 
     if _ytmusic is None:
         raise RuntimeError("ytmusicapi is not available.")
@@ -189,8 +232,9 @@ def _download_and_normalize_sync(video_id: str) -> Path:
     if existing:
         return existing
 
-    ytdlp_bin = shutil.which("yt-dlp") or str(Path(sys.executable).parent / "yt-dlp")
-    if not Path(ytdlp_bin).exists():
+    venv_ytdlp = Path(sys.executable).parent / "yt-dlp"
+    ytdlp_bin = (str(venv_ytdlp) if venv_ytdlp.exists() else None) or shutil.which("yt-dlp")
+    if ytdlp_bin and not Path(ytdlp_bin).exists():
         ytdlp_bin = None
     venv_ffmpeg = Path(sys.executable).parent / "ffmpeg"
     ffmpeg_bin = (
@@ -216,9 +260,10 @@ def _download_and_normalize_sync(video_id: str) -> Path:
                 "--no-playlist",
                 "--quiet",
                 "--no-warnings",
-                "-o", "-",
-                url,
             ]
+            if shutil.which("node"):
+                ytdlp_cmd.extend(["--js-runtimes", "node", "--remote-components", "ejs:github"])
+            ytdlp_cmd.extend(["-o", "-", url])
             ffmpeg_cmd = [
                 ffmpeg_bin,
                 "-hide_banner",
@@ -226,7 +271,7 @@ def _download_and_normalize_sync(video_id: str) -> Path:
                 "-y",
                 "-i", "pipe:0",
                 "-vn",
-                "-af", "silenceremove=start_periods=1:start_duration=0.1:start_threshold=-45dB,loudnorm=I=-14:TP=-1.5:LRA=11",
+                "-af", "silenceremove=start_periods=1:start_duration=0.1:start_threshold=-45dB,loudnorm=I=-9:TP=-0.3:LRA=9,volume=1.35",
                 "-acodec", "libmp3lame",
                 "-ab", "192k",
                 "-ar", "44100",
@@ -323,14 +368,30 @@ class AudioPrefetchEngine:
             except asyncio.CancelledError:
                 pass
 
-    async def ensure_track_buffered(self, video_id: str, title: str = "", artist: str = "") -> Optional[Path]:
+    async def ensure_track_buffered(
+        self,
+        video_id: str,
+        title: str = "",
+        artist: str = "",
+        wait_if_inflight: bool = False,
+    ) -> Optional[Path]:
         existing = get_cached_audio_path(video_id)
         if existing:
             database.update_audio_status(video_id, "ready", existing.name)
             return existing
 
         if video_id in self._inflight_downloads:
-            return None
+            if not wait_if_inflight:
+                return None
+            # Wait up to 60s for the in-flight background download to complete
+            for _ in range(120):
+                await asyncio.sleep(0.5)
+                ready_path = get_cached_audio_path(video_id)
+                if ready_path:
+                    return ready_path
+                if video_id not in self._inflight_downloads:
+                    break
+            return get_cached_audio_path(video_id)
 
         self._inflight_downloads.add(video_id)
         database.update_audio_status(video_id, "downloading", "")
@@ -381,6 +442,7 @@ class AudioPrefetchEngine:
             try:
                 now_playing = database.get_now_playing()
                 queue = database.get_active_queue()
+                pending = database.get_pending_approvals()
                 next_seed = database.get_designated_next_seed()
 
                 # 1. Fire-and-forget AI Scene Generation in parallel (never blocks audio downloading!)
@@ -388,6 +450,7 @@ class AudioPrefetchEngine:
                 if now_playing:
                     scene_targets.append(now_playing)
                 scene_targets.extend(queue[:3])
+                scene_targets.extend(pending[:2])
                 if next_seed:
                     scene_targets.append(next_seed)
 
@@ -399,11 +462,12 @@ class AudioPrefetchEngine:
                             self._generate_scene_bg(vid, track["title"], track["artist"])
                         )
 
-                # 2. Immediately Pre-fetch Audio (Now Playing + Top 2 in queue + Next Seed)
+                # 2. Immediately Pre-fetch Audio (Now Playing + Top 3 in queue + Pending Approvals + Next Seed)
                 audio_targets: List[Dict[str, Any]] = []
                 if now_playing:
                     audio_targets.append(now_playing)
-                audio_targets.extend(queue[:2])
+                audio_targets.extend(queue[:3])
+                audio_targets.extend(pending[:3])
                 if next_seed:
                     audio_targets.append(next_seed)
 

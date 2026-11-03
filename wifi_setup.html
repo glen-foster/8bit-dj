@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>8-BIT JUKEBOX // WI-FI SETUP</title>
+  <style>
+    :root {
+      --bg-dark: #090518;
+      --panel-bg: #140c30;
+      --neon-cyan: #00f5d4;
+      --neon-pink: #ff2a85;
+      --neon-amber: #ffbe0b;
+      --text-white: #ffffff;
+      --text-dim: #9ca3af;
+    }
+
+    * {
+      box-sizing: border-box;
+      font-family: "Courier New", Courier, monospace;
+      font-weight: 800;
+    }
+
+    body {
+      margin: 0;
+      padding: 16px;
+      background-color: var(--bg-dark);
+      background-image:
+        radial-gradient(rgba(0, 245, 212, 0.12) 1px, transparent 1px),
+        radial-gradient(rgba(255, 42, 133, 0.08) 1px, var(--bg-dark) 1px);
+      background-size: 24px 24px;
+      background-position: 0 0, 12px 12px;
+      color: var(--text-white);
+      min-height: 100vh;
+    }
+
+    .container {
+      max-width: 440px;
+      margin: 0 auto;
+    }
+
+    .pixel-card {
+      background: var(--panel-bg);
+      border: 4px solid var(--neon-cyan);
+      box-shadow: 6px 6px 0px #000000;
+      padding: 18px;
+      margin-bottom: 16px;
+    }
+
+    .pixel-card-pink {
+      background: #1c0929;
+      border: 4px solid var(--neon-pink);
+      box-shadow: 6px 6px 0px #000000;
+      padding: 16px;
+      margin-bottom: 16px;
+    }
+
+    .badge {
+      display: inline-block;
+      background: var(--neon-pink);
+      color: #fff;
+      font-size: 11px;
+      padding: 4px 8px;
+      letter-spacing: 1px;
+      margin-bottom: 8px;
+    }
+
+    h1 {
+      font-size: 20px;
+      margin: 0 0 6px 0;
+      color: var(--neon-cyan);
+      letter-spacing: 1px;
+      text-shadow: 2px 2px 0px #000;
+    }
+
+    p.sub {
+      font-size: 12px;
+      color: var(--text-dim);
+      margin: 0;
+      line-height: 1.4;
+    }
+
+    .status-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: #000;
+      border: 2px solid #374151;
+      padding: 10px 12px;
+      margin-top: 12px;
+      font-size: 12px;
+    }
+
+    .status-dot {
+      display: inline-block;
+      width: 10px;
+      height: 10px;
+      background: var(--neon-amber);
+      margin-right: 8px;
+    }
+
+    .status-dot.online {
+      background: var(--neon-cyan);
+    }
+
+    .section-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 2px solid #374151;
+      padding-bottom: 10px;
+      margin-bottom: 12px;
+    }
+
+    .section-title {
+      font-size: 13px;
+      color: var(--neon-amber);
+      letter-spacing: 0.5px;
+    }
+
+    .btn {
+      appearance: none;
+      border: 3px solid #ffffff;
+      box-shadow: 3px 3px 0px #000000;
+      padding: 12px 14px;
+      font-size: 13px;
+      cursor: pointer;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      text-align: center;
+      display: inline-block;
+    }
+
+    .btn:active {
+      transform: translate(2px, 2px);
+      box-shadow: 1px 1px 0px #000000;
+    }
+
+    .btn-sm {
+      padding: 6px 10px;
+      font-size: 11px;
+      border-width: 2px;
+    }
+
+    .btn-cyan {
+      background: var(--neon-cyan);
+      color: #000000;
+      width: 100%;
+    }
+
+    .btn-pink {
+      background: var(--neon-pink);
+      color: #ffffff;
+      width: 100%;
+    }
+
+    .btn-dark {
+      background: #1f2937;
+      color: var(--neon-cyan);
+    }
+
+    .net-list {
+      max-height: 250px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-bottom: 14px;
+    }
+
+    .net-item {
+      background: rgba(0, 0, 0, 0.75);
+      border: 2px solid #374151;
+      padding: 11px 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      cursor: pointer;
+    }
+
+    .net-item.selected {
+      border-color: var(--neon-cyan);
+      background: rgba(0, 245, 212, 0.14);
+    }
+
+    .net-name {
+      font-size: 14px;
+      color: #ffffff;
+      word-break: break-all;
+    }
+
+    .net-meta {
+      font-size: 11px;
+      color: var(--text-dim);
+      margin-top: 3px;
+    }
+
+    .signal-pill {
+      font-size: 11px;
+      padding: 3px 7px;
+      background: #111827;
+      border: 1px solid var(--neon-cyan);
+      color: var(--neon-cyan);
+      white-space: nowrap;
+      margin-left: 8px;
+    }
+
+    label {
+      display: block;
+      font-size: 11px;
+      color: var(--neon-cyan);
+      margin-bottom: 6px;
+      letter-spacing: 0.5px;
+    }
+
+    input[type="text"],
+    input[type="password"] {
+      width: 100%;
+      background: #000000;
+      border: 3px solid var(--neon-cyan);
+      color: #ffffff;
+      padding: 12px;
+      font-size: 14px;
+      margin-bottom: 12px;
+      outline: none;
+    }
+
+    .toast {
+      padding: 12px;
+      border: 3px solid #ffffff;
+      margin-bottom: 14px;
+      font-size: 12px;
+      line-height: 1.4;
+      display: none;
+    }
+
+    .toast.info {
+      display: block;
+      background: #1e1b4b;
+      color: var(--neon-cyan);
+      border-color: var(--neon-cyan);
+    }
+
+    .toast.success {
+      display: block;
+      background: #064e3b;
+      color: #a7f3d0;
+      border-color: #34d399;
+    }
+
+    .toast.error {
+      display: block;
+      background: #7f1d1d;
+      color: #fecaca;
+      border-color: #f87171;
+    }
+
+    .footer-links {
+      text-align: center;
+      margin-top: 12px;
+      font-size: 12px;
+    }
+
+    .footer-links a {
+      color: var(--neon-cyan);
+      text-decoration: underline;
+      margin: 0 8px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- Top Header Card -->
+    <div class="pixel-card-pink">
+      <div class="badge">8-BIT JUKEBOX // CAPTIVE PORTAL</div>
+      <h1>WI-FI SETUP</h1>
+      <p class="sub">
+        SELECT THIS VENUE'S WI-FI NETWORK BELOW SO THE PI CAN CONNECT &amp; GENERATE THE LIVE PARTY QR CODE ON THE TV!
+      </p>
+      <div class="status-bar">
+        <div>
+          <span id="statusDot" class="status-dot"></span>
+          <span id="currentWifiText">CHECKING STATUS...</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Alert / Progress Box -->
+    <div id="feedbackBox" class="toast"></div>
+
+    <!-- Step 1: Select Network -->
+    <div class="pixel-card">
+      <div class="section-header">
+        <span class="section-title">1. PICK VENUE WI-FI</span>
+        <button type="button" onclick="loadNetworks(true)" id="rescanBtn" class="btn btn-sm btn-dark">
+          RESCAN
+        </button>
+      </div>
+
+      <div id="networkList" class="net-list">
+        <div style="text-align:center; padding: 18px; color: #9ca3af; font-size: 12px;">
+          SCANNING AIRWAVES...
+        </div>
+      </div>
+
+      <!-- Step 2: Credentials Form -->
+      <form onsubmit="submitWifiConnect(event)">
+        <label for="ssidInput">WI-FI NETWORK NAME (SSID)</label>
+        <input
+          id="ssidInput"
+          type="text"
+          placeholder="TAP A NETWORK ABOVE OR TYPE SSID..."
+          required
+          autocomplete="off"
+          autocorrect="off"
+          autocapitalize="none"
+        />
+
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <label for="passwordInput">WI-FI PASSWORD</label>
+          <label style="cursor:pointer; color:#ffbe0b; font-size:11px;" onclick="togglePwVisibility()">
+            [SHOW/HIDE]
+          </label>
+        </div>
+        <input
+          id="passwordInput"
+          type="password"
+          placeholder="ENTER WI-FI PASSWORD (LEAVE BLANK IF OPEN)"
+          autocomplete="off"
+        />
+
+        <div id="pinContainer" style="display:none;">
+          <label for="pinInput">HOST PIN (DEFAULT: 1234)</label>
+          <input
+            id="pinInput"
+            type="password"
+            inputmode="numeric"
+            value="1234"
+            placeholder="HOST PIN"
+          />
+        </div>
+
+        <button type="submit" id="connectBtn" class="btn btn-cyan">
+          [ CONNECT JUKEBOX TO WI-FI ]
+        </button>
+      </form>
+    </div>
+
+    <div class="footer-links">
+      <a href="/mobile">GO TO MOBILE DJ</a> |
+      <a href="/host">HOST CONSOLE</a>
+    </div>
+  </div>
+
+  <script>
+    let networks = [];
+    let selectedSsid = '';
+
+    function showFeedback(msg, type) {
+      const box = document.getElementById('feedbackBox');
+      box.className = 'toast ' + (type || 'info');
+      box.textContent = msg;
+    }
+
+    function togglePwVisibility() {
+      const pw = document.getElementById('passwordInput');
+      pw.type = pw.type === 'password' ? 'text' : 'password';
+    }
+
+    function selectNetwork(ssid, security) {
+      selectedSsid = ssid;
+      document.getElementById('ssidInput').value = ssid;
+      renderNetworkList();
+      if (security && security !== 'OPEN' && security !== '--') {
+        document.getElementById('passwordInput').focus();
+      }
+    }
+
+    function renderNetworkList() {
+      const container = document.getElementById('networkList');
+      if (!networks || networks.length === 0) {
+        container.innerHTML = '<div style="text-align:center; padding: 16px; color: #9ca3af; font-size: 12px;">NO NETWORKS FOUND YET. TAP RESCAN OR TYPE SSID BELOW.</div>';
+        return;
+      }
+
+      container.innerHTML = networks.map(net => {
+        const isSel = net.ssid === selectedSsid;
+        const lockTag = (net.security && net.security !== 'OPEN' && net.security !== '--') ? 'LOCKED' : 'OPEN';
+        const activeTag = net.in_use ? ' [CONNECTED]' : '';
+        return `
+          <div class="net-item ${isSel ? 'selected' : ''}" onclick="selectNetwork(${JSON.stringify(net.ssid).replace(/"/g, '&quot;')}, '${net.security || ''}')">
+            <div>
+              <div class="net-name">${escapeHtml(net.ssid)}${activeTag}</div>
+              <div class="net-meta">${escapeHtml(net.security || 'OPEN')} // ${lockTag}</div>
+            </div>
+            <div class="signal-pill">${net.signal || 0}%</div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function escapeHtml(str) {
+      return String(str || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    async function loadNetworks(rescan = false) {
+      const btn = document.getElementById('rescanBtn');
+      btn.textContent = 'SCANNING...';
+      btn.disabled = true;
+      try {
+        const res = await fetch('/api/wifi/networks?rescan=' + (rescan ? '1' : '0'));
+        const data = await res.json();
+        networks = data.networks || [];
+        renderNetworkList();
+
+        if (data.status) {
+          const dot = document.getElementById('statusDot');
+          const txt = document.getElementById('currentWifiText');
+          if (data.status.hotspot_active) {
+            dot.className = 'status-dot';
+            txt.textContent = 'SETUP HOTSPOT MODE (' + data.status.setup_ssid + ')';
+          } else if (data.status.connected_ssid) {
+            dot.className = 'status-dot online';
+            txt.textContent = 'CONNECTED TO: ' + data.status.connected_ssid;
+          } else {
+            dot.className = 'status-dot';
+            txt.textContent = 'DISCONNECTED';
+          }
+        }
+      } catch (err) {
+        showFeedback('COULD NOT REACH JUKEBOX WI-FI API.', 'error');
+      } finally {
+        btn.textContent = 'RESCAN';
+        btn.disabled = false;
+      }
+    }
+
+    async function submitWifiConnect(e) {
+      e.preventDefault();
+      const ssid = document.getElementById('ssidInput').value.trim();
+      const password = document.getElementById('passwordInput').value;
+      const pin = document.getElementById('pinInput').value.trim() || '1234';
+      if (!ssid) return;
+
+      const btn = document.getElementById('connectBtn');
+      btn.textContent = 'CONNECTING PI TO ' + ssid + '...';
+      btn.disabled = true;
+
+      showFeedback(
+        "CONNECTING RASPBERRY PI TO '" + ssid + "'! " +
+        "NOTE: THE SETUP HOTSPOT WILL TURN OFF NOW. LOOK AT THE TV BIG SCREEN IN ~10 SECONDS TO SCAN THE NEW PARTY QR CODE!",
+        'info'
+      );
+
+      try {
+        const res = await fetch('/api/wifi/connect', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ssid, password, pin })
+        });
+        const data = await res.json();
+        if (res.ok && data.ok) {
+          showFeedback(
+            "SUCCESS! CONNECTED TO '" + ssid + "'! CHECK THE TV BIG SCREEN FOR THE LIVE PARTY QR CODE!",
+            'success'
+          );
+          loadNetworks(false);
+        } else {
+          showFeedback(data.message || data.detail || 'FAILED TO CONNECT. CHECK PASSWORD & TRY AGAIN.', 'error');
+        }
+      } catch (err) {
+        // When switching off the setup hotspot, the phone's connection to 10.42.0.1 drops right as the Pi joins the new Wi-Fi!
+        showFeedback(
+          "HOTSPOT HANDOFF COMPLETE! THE PI IS SWITCHING TO '" + ssid + "'. " +
+          "WATCH THE TV BIG SCREEN FOR THE NEW QR CODE (IF PASSWORD WAS WRONG, '8BIT-JUKEBOX-SETUP' WILL REAPPEAR IN 20 SECONDS).",
+          'success'
+        );
+      } finally {
+        btn.textContent = '[ CONNECT JUKEBOX TO WI-FI ]';
+        btn.disabled = false;
+      }
+    }
+
+    loadNetworks(false);
+  </script>
+</body>
+</html>

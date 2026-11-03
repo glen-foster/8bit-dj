@@ -296,7 +296,7 @@
           title="Click to open Host Controls (Shortcut: H)"
           class="col-span-6 pixel-box-highlight p-3.5 flex flex-col items-center justify-between text-center min-w-0 cursor-pointer hover:brightness-110 transition-all"
         >
-          <div class="text-[10px] xl:text-xs text-white truncate w-full">JOIN THE PARTY!</div>
+          <div id="qrBoxHeaderTitle" class="text-[10px] xl:text-xs text-white truncate w-full">JOIN THE PARTY!</div>
           <div class="bg-black p-2 border-2 border-white my-2 shrink-0">
             <img
               id="qrCodeImg"
@@ -357,6 +357,9 @@
     let analyser = null;
     let gainNodeA = null;
     let gainNodeB = null;
+    let masterGainNode = null;
+    let compressorNode = null;
+    let masterVolumePct = Number(localStorage.getItem('jukebox_master_vol_pct') || 185);
     let freqData = new Uint8Array(64);
     let timeData = new Uint8Array(64);
 
@@ -366,6 +369,14 @@
     let isCrossfading = false;
     let crossfadeTimer = null;
     let advanceRequestedForId = null;
+
+    function setMasterVolumePct(pct) {
+      masterVolumePct = Math.max(25, Math.min(300, Number(pct) || 185));
+      localStorage.setItem('jukebox_master_vol_pct', String(masterVolumePct));
+      if (masterGainNode) {
+        masterGainNode.gain.value = masterVolumePct / 100.0;
+      }
+    }
 
     function initAudioGraph() {
       if (audioCtx) return;
@@ -383,6 +394,17 @@
       gainNodeA.gain.value = 1.0;
       gainNodeB.gain.value = 0.0;
 
+      // Master Gain Boost (default 185% for loud HDMI TV output) + Brickwall Limiter Compressor
+      masterGainNode = audioCtx.createGain();
+      masterGainNode.gain.value = masterVolumePct / 100.0;
+
+      compressorNode = audioCtx.createDynamicsCompressor();
+      compressorNode.threshold.value = -6;
+      compressorNode.knee.value = 6;
+      compressorNode.ratio.value = 8;
+      compressorNode.attack.value = 0.003;
+      compressorNode.release.value = 0.15;
+
       const sourceA = audioCtx.createMediaElementSource(deckAEl);
       const sourceB = audioCtx.createMediaElementSource(deckBEl);
 
@@ -391,7 +413,9 @@
 
       gainNodeA.connect(analyser);
       gainNodeB.connect(analyser);
-      analyser.connect(audioCtx.destination);
+      analyser.connect(masterGainNode);
+      masterGainNode.connect(compressorNode);
+      compressorNode.connect(audioCtx.destination);
     }
 
     async function ensureAudioUnlocked() {
@@ -442,11 +466,17 @@
       }
       updateGainBars();
 
-      currentEl.play().then(() => {
-        document.getElementById('audioUnlockBanner').classList.add('hidden');
-      }).catch(() => {
-        document.getElementById('audioUnlockBanner').classList.remove('hidden');
-      });
+      const tryPlayActive = () => {
+        currentEl.play().then(() => {
+          document.getElementById('audioUnlockBanner').classList.add('hidden');
+        }).catch(() => {
+          if (audioCtx && audioCtx.state !== 'running') {
+            document.getElementById('audioUnlockBanner').classList.remove('hidden');
+          }
+        });
+      };
+      currentEl.addEventListener('canplay', tryPlayActive, { once: true });
+      tryPlayActive();
 
       if (track.scene) {
         currentScene = track.scene;
@@ -529,7 +559,7 @@
           };
           nextEl.addEventListener('canplay', done, { once: true });
           nextEl.addEventListener('error', done, { once: true });
-          setTimeout(done, 15000);
+          setTimeout(done, 45000);
         });
       }
 
@@ -610,6 +640,7 @@
     const VIZ_MODES = [
       { id: 'auto', label: 'AUTO' },
       { id: 'side_scroller', label: 'SIDE-SCROLLER' },
+      { id: 'beat_em_up', label: 'BEAT-EM-UP' },
       { id: 'winamp_analyzer', label: 'WINAMP LED' },
       { id: 'winamp_fire', label: 'WINAMP FIRE' },
       { id: 'city_cruiser', label: 'CITY SKYLINE' },
@@ -641,20 +672,20 @@
         return currentScene.bg_style;
       }
 
-      // Automatically favor side_scroller when character/walker sprites are present!
+      // Automatically favor side_scroller or beat_em_up when character/walker sprites are present!
       const hasCharacters = sprites.some(s => s.behavior === 'dancers' || s.behavior === 'scroll');
       if (hasCharacters) {
         const titleStr = (currentScene && currentScene.stage_title) ? currentScene.stage_title : '';
         let hash = 0;
         for (let i = 0; i < titleStr.length; i++) hash = (hash * 31 + titleStr.charCodeAt(i)) >>> 0;
-        const charModes = ['side_scroller', 'side_scroller', 'city_cruiser', 'winamp_analyzer'];
+        const charModes = ['side_scroller', 'beat_em_up', 'side_scroller', 'beat_em_up', 'city_cruiser', 'winamp_analyzer'];
         return charModes[hash % charModes.length];
       }
 
       const titleStr = (currentScene && currentScene.stage_title) ? currentScene.stage_title : 'STAGE';
       let hash = 0;
       for (let i = 0; i < titleStr.length; i++) hash = (hash * 31 + titleStr.charCodeAt(i)) >>> 0;
-      const allAutoModes = ['winamp_analyzer', 'side_scroller', 'winamp_fire', 'city_cruiser', 'synth_grid'];
+      const allAutoModes = ['winamp_analyzer', 'side_scroller', 'beat_em_up', 'winamp_fire', 'city_cruiser', 'synth_grid'];
       return allAutoModes[hash % allAutoModes.length];
     }
 
@@ -700,6 +731,10 @@
     }));
 
     let frameTick = 0;
+    let stageScrollX = 0;
+    let smoothBass = 0.15;
+    let smoothMid = 0.12;
+    let smoothTreble = 0.10;
 
     function getAudioEnergy() {
       if (!analyser || !audioCtx || audioCtx.state !== 'running') {
@@ -875,17 +910,17 @@
       }
 
       // 3. Parallax Rounded Retro Platformer Hills & Bushes
-      const hillScroll = Math.floor(frameTick * 0.5);
+      const hillScroll = Math.floor(stageScrollX * 0.65);
       ctx.fillStyle = pal.bg_secondary;
       for (let x = 0; x < W; x += 4) {
         const wx = x + hillScroll;
-        const hillH = Math.floor(12 + Math.max(0, Math.sin(wx * 0.035) * 18) + bass * 5);
+        const hillH = Math.floor(12 + Math.max(0, Math.sin(wx * 0.035) * 18) + smoothBass * 4);
         ctx.fillRect(x, groundY - hillH, 4, hillH);
       }
 
-      // 4. Floating Retro Brick / Note Platforms that bounce on bass hits
-      const platScroll = (frameTick * 0.9) % 110;
-      const bassBump = bass > 0.48 ? -3 : 0;
+      // 4. Floating Retro Brick / Note Platforms that bounce gently on bass hits
+      const platScroll = (stageScrollX * 1.1) % 110;
+      const bassBump = -Math.round(smoothBass * 3);
       for (let p = 0; p < 4; p++) {
         const px = Math.floor(W - ((p * 110 + platScroll) % (W + 60)) - 20);
         const py = groundY - 38 - (p % 2) * 14 + bassBump;
@@ -914,7 +949,7 @@
       ctx.fillStyle = pal.bg_secondary;
       ctx.fillRect(0, groundY + 5, W, H - (groundY + 5));
 
-      const tileOffset = Math.floor(frameTick * (1.2 + bass * 1.5)) % 16;
+      const tileOffset = Math.floor(stageScrollX * 1.5) % 16;
       ctx.fillStyle = "#000000";
       for (let y = groundY + 5; y < H; y += 8) {
         ctx.fillRect(0, y, W, 1);
@@ -925,6 +960,159 @@
       }
 
       return groundY;
+    }
+
+    // -------------------------------------------------------------------------
+    // STAGE STYLE 1B: 90s ARCADE BEAT-EM-UP STREET BRAWLER (Streets of Rage / Final Fight)
+    // -------------------------------------------------------------------------
+    function renderBeatEmUpStage(pal, bass, mid, treble) {
+      const wallTopY = 56;
+      const curbY = 98;
+      const streetTopY = 108;
+
+      // 1. Rooftop Audio-Reactive Neon Equalizer behind the brick alley wall
+      for (let b = 0; b < NUM_SPECTRUM_BARS; b++) {
+        const val = getBarValue(b, bass);
+        const h = Math.max(2, Math.floor(val * 24));
+        ctx.fillStyle = b % 2 === 0 ? pal.accent_neon : pal.pixel_highlight;
+        ctx.fillRect(b * 10 + 2, wallTopY - h, 6, h);
+      }
+
+      // 2. Scrolling Brick Alley Wall & Storefronts
+      ctx.fillStyle = pal.bg_secondary;
+      ctx.fillRect(0, wallTopY, W, curbY - wallTopY);
+      ctx.fillStyle = pal.accent_neon;
+      ctx.fillRect(0, wallTopY, W, 2);
+
+      const alleyScroll = Math.floor(stageScrollX * 0.85);
+      ctx.fillStyle = "rgba(0, 0, 0, 0.45)";
+      for (let y = wallTopY + 6; y < curbY; y += 6) {
+        ctx.fillRect(0, y, W, 1);
+        const shift = ((y - wallTopY) % 12 === 0) ? 0 : 6;
+        for (let x = -(alleyScroll % 12) + shift; x < W; x += 12) {
+          ctx.fillRect(x, y, 1, 6);
+        }
+      }
+
+      // 3. Repeating Alleyway Props: Neon Signs, Barred Doors, Streetlamps & Burning Trash Barrels
+      const propSpan = 88;
+      let propX = -(alleyScroll % propSpan);
+      let propIdx = Math.floor(alleyScroll / propSpan);
+      while (propX < W + 32) {
+        // Dark Alley Doorway + Grate
+        ctx.fillStyle = "#05030a";
+        ctx.fillRect(propX + 8, curbY - 28, 16, 28);
+        ctx.fillStyle = pal.pixel_highlight;
+        ctx.fillRect(propX + 7, curbY - 29, 18, 2);
+
+        // Glowing Storefront Neon Sign (pulsing on mid/treble)
+        const signX = propX + 32;
+        const signY = wallTopY + 8;
+        ctx.fillStyle = "#05030a";
+        ctx.fillRect(signX, signY, 28, 13);
+        ctx.fillStyle = (propIdx % 2 === 0) ? pal.pixel_highlight : pal.accent_neon;
+        ctx.fillRect(signX, signY, 28, 1);
+        ctx.fillRect(signX, signY + 12, 28, 1);
+        ctx.fillRect(signX, signY, 1, 13);
+        ctx.fillRect(signX + 27, signY, 1, 13);
+        // Inner neon glyph bars
+        ctx.fillStyle = (smoothTreble > 0.35 && Math.floor(frameTick / 8) % 2 === 0) ? "#ffffff" : pal.accent_neon;
+        ctx.fillRect(signX + 4, signY + 4, 6, 5);
+        ctx.fillRect(signX + 12, signY + 4, 4, 5);
+        ctx.fillRect(signX + 18, signY + 4, 6, 5);
+
+        // Streetlamp Post & Burning Barrel on Sidewalk
+        const barrelX = propX + 68;
+        const barrelY = curbY - 12;
+        ctx.fillStyle = "#111827";
+        ctx.fillRect(barrelX, barrelY, 10, 14);
+        ctx.fillStyle = pal.accent_neon;
+        ctx.fillRect(barrelX, barrelY + 3, 10, 1);
+        ctx.fillRect(barrelX, barrelY + 9, 10, 1);
+        // Audio-reactive pixel flames leaping out of the barrel
+        const flameH = 4 + Math.floor(smoothBass * 7) + (Math.floor(frameTick / 6 + propIdx * 3) % 3);
+        ctx.fillStyle = pal.pixel_highlight;
+        ctx.fillRect(barrelX + 1, barrelY - flameH, 8, flameH);
+        ctx.fillStyle = "#facc15";
+        ctx.fillRect(barrelX + 2, barrelY - Math.max(2, flameH - 2), 6, Math.max(2, flameH - 2));
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(barrelX + 4, barrelY - 2, 2, 2);
+
+        propX += propSpan;
+        propIdx++;
+      }
+
+      // 4. 2.5D Belt-Scroller Sidewalk & Curb
+      ctx.fillStyle = pal.bg_secondary;
+      ctx.fillRect(0, curbY, W, streetTopY - curbY);
+      ctx.fillStyle = pal.accent_neon;
+      ctx.fillRect(0, curbY, W, 1);
+      ctx.fillStyle = pal.pixel_highlight;
+      ctx.fillRect(0, streetTopY - 2, W, 2);
+
+      // Angled perspective sidewalk slab joints
+      ctx.fillStyle = "#000000";
+      for (let x = -(alleyScroll % 20); x < W + 20; x += 20) {
+        ctx.beginPath();
+        ctx.moveTo(x, curbY);
+        ctx.lineTo(x - 6, streetTopY);
+        ctx.stroke();
+      }
+
+      // 5. 2.5D Asphalt Street Plane with Scrolling Center Dashes
+      ctx.fillStyle = "#090614";
+      ctx.fillRect(0, streetTopY, W, H - streetTopY);
+
+      const dashScroll = Math.floor(stageScrollX * 1.2) % 32;
+      ctx.fillStyle = "#facc15";
+      for (let x = -dashScroll; x < W; x += 32) {
+        ctx.fillRect(x, streetTopY + 26, 16, 3);
+      }
+
+      // 6. Arcade Beat-Em-Up 1P VS BOSS Health Bars & Flashing "GO! >>" Arrow
+      const hudX = 12;
+      const hudY = 26;
+      const barW = 68;
+      // 1P Life Bar (Left)
+      ctx.fillStyle = "#000000";
+      ctx.fillRect(hudX - 1, hudY - 1, barW + 2, 7);
+      ctx.fillStyle = "#dc2626";
+      ctx.fillRect(hudX, hudY, barW, 5);
+      const p1Fill = Math.max(18, Math.floor(barW * (0.90 - smoothBass * 0.14)));
+      ctx.fillStyle = "#facc15";
+      ctx.fillRect(hudX, hudY, p1Fill, 5);
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(hudX, hudY, p1Fill, 1);
+
+      // Center KO Badge
+      ctx.fillStyle = pal.pixel_highlight;
+      ctx.fillRect(hudX + barW + 4, hudY - 2, 12, 9);
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(hudX + barW + 6, hudY, 8, 5);
+
+      // BOSS Life Bar (Right)
+      const bossX = hudX + barW + 20;
+      ctx.fillStyle = "#000000";
+      ctx.fillRect(bossX - 1, hudY - 1, barW + 2, 7);
+      ctx.fillStyle = "#dc2626";
+      ctx.fillRect(bossX, hudY, barW, 5);
+      const bossFill = Math.max(12, Math.floor(barW * (0.82 - smoothBass * 0.30)));
+      ctx.fillStyle = pal.accent_neon;
+      ctx.fillRect(bossX + (barW - bossFill), hudY, bossFill, 5);
+
+      // Flashing Arcade "GO! >>" Arrow on Beat
+      if (Math.floor(frameTick / 24) % 2 === 0) {
+        const goX = 160;
+        const goY = 38;
+        ctx.fillStyle = "#facc15";
+        ctx.fillRect(goX, goY + 2, 8, 4);
+        ctx.fillRect(goX + 8, goY, 2, 8);
+        ctx.fillRect(goX + 10, goY + 1, 2, 6);
+        ctx.fillRect(goX + 12, goY + 2, 2, 4);
+        ctx.fillRect(goX + 14, goY + 3, 2, 2);
+      }
+
+      return streetTopY + 18;
     }
 
     // -------------------------------------------------------------------------
@@ -1038,7 +1226,7 @@
       ctx.fillStyle = pal.pixel_highlight;
       ctx.fillRect(0, horizonY, W, 2);
 
-      const laneScroll = Math.floor(frameTick * (1.8 + bass * 2.0)) % 24;
+      const laneScroll = Math.floor(stageScrollX * 1.8) % 24;
       ctx.fillStyle = "#ffffff";
       for (let x = -laneScroll; x < W; x += 24) {
         ctx.fillRect(x, horizonY + 14, 12, 2);
@@ -1055,7 +1243,7 @@
 
       // 1. Parallax Starfield
       for (const st of stars) {
-        st.x -= st.speed * (1 + bass * 2.2);
+        st.x -= st.speed * (0.7 + smoothBass * 0.8);
         if (st.x < 0) {
           st.x = W;
           st.y = Math.random() * (H * 0.62);
@@ -1065,7 +1253,7 @@
       }
 
       // 2. Retro Pulsing Segmented Synth Sun
-      const sunRadius = Math.floor(22 + bass * 12);
+      const sunRadius = Math.floor(22 + smoothBass * 8);
       const sunCenterX = Math.floor(W * 0.42);
       const sunCenterY = horizonY - 6;
 
@@ -1081,9 +1269,9 @@
       for (let x = 0; x < W; x += 4) {
         const mHeight = Math.floor(
           10 +
-          Math.sin((x + frameTick * 0.4) * 0.045) * 8 +
-          Math.cos((x - frameTick * 0.2) * 0.09) * 5 +
-          bass * 8
+          Math.sin((x + stageScrollX * 0.5) * 0.045) * 8 +
+          Math.cos((x - stageScrollX * 0.25) * 0.09) * 5 +
+          smoothBass * 5
         );
         ctx.fillRect(x, horizonY - mHeight, 4, mHeight);
       }
@@ -1094,7 +1282,7 @@
       ctx.fillStyle = pal.accent_neon;
       ctx.fillRect(0, horizonY, W, 2);
 
-      const gridOffset = (frameTick * (0.6 + bass * 1.4)) % 10;
+      const gridOffset = (stageScrollX * 0.8) % 10;
       for (let i = 1; i <= 7; i++) {
         const yPos = horizonY + Math.floor(Math.pow(i + gridOffset / 10, 1.75) * 2.4);
         if (yPos < H) {
@@ -1122,6 +1310,11 @@
     function renderArcadeCanvas() {
       frameTick++;
       const { bass, mid, treble } = getAudioEnergy();
+      // Smooth audio envelopes so sprites and camera scroll glide smoothly without frame-to-frame jitter
+      smoothBass += (bass - smoothBass) * 0.07;
+      smoothMid += (mid - smoothMid) * 0.07;
+      smoothTreble += (treble - smoothTreble) * 0.07;
+      stageScrollX += 0.35 + smoothBass * 0.28;
       const pal = (currentScene && currentScene.palette) ? currentScene.palette : {
         bg_primary: "#090518",
         bg_secondary: "#1d1138",
@@ -1152,6 +1345,8 @@
       ctx.globalAlpha = 0.62;
       if (activeStyle === 'side_scroller') {
         horizonY = renderSideScrollerStage(pal, bass, mid, treble);
+      } else if (activeStyle === 'beat_em_up') {
+        horizonY = renderBeatEmUpStage(pal, bass, mid, treble);
       } else if (activeStyle === 'winamp_analyzer') {
         horizonY = renderWinampAnalyzerStage(pal, bass, mid, treble);
       } else if (activeStyle === 'winamp_fire') {
@@ -1178,27 +1373,59 @@
         let drawY = actor.y;
         let flipX = false;
 
-        if (activeStyle === 'side_scroller' && (behavior === 'dancers' || behavior === 'scroll' || behavior === 'bounce')) {
-          // In Side-Scroller mode, characters run and jump along the platformer ground!
-          actor.x += Math.abs(actor.vx) * (1.1 + bass * 1.6);
+        if (activeStyle === 'beat_em_up' && behavior !== 'rain') {
+          // 2.5D Belt-Scroller Brawler Planes: smooth, deliberate footwork & rhythmic sparring
+          const pairIdx = Math.floor(i / 2);
+          const isLeftFighter = (i % 2 === 0);
+          const laneBaseY = 98 + (pairIdx % 4) * 14; // Depth-sorted street lanes
+          const centerX = 36 + (pairIdx * 42) % (W - 92) + Math.sin(frameTick * 0.015 + pairIdx) * 8;
+          // Smooth continuous footwork wave: fighters step in and out smoothly without snapping
+          const brawlWave = Math.sin(frameTick * 0.038 + pairIdx * 1.7);
+          const spacing = 11 - brawlWave * 7; // Ranges smoothly from 4px (close clash) to 18px (footsies)
+          drawX = isLeftFighter ? (centerX - spacing) : (centerX + spacing);
+
+          // Gentle fighter stance bob + occasional smooth jump-kick arc
+          const jumpWave = Math.max(0, Math.sin(frameTick * 0.032 + i * 1.9) - 0.55) / 0.45;
+          const stanceBob = Math.abs(Math.sin(frameTick * 0.06 + i)) * 2;
+          const jumpKick = Math.floor(stanceBob + jumpWave * (10 + smoothBass * 6));
+          drawY = laneBaseY - jumpKick;
+          flipX = !isLeftFighter;
+
+          // Draw 2.5D Belt-Scroller Ground Drop Shadow on the asphalt
+          ctx.fillStyle = "rgba(0, 0, 0, 0.65)";
+          ctx.fillRect(Math.round(drawX) + 4, laneBaseY + 29, 24, 4);
+
+          // Draw Arcade Hit Spark / Impact Burst when fighters step into close range
+          if (!isLeftFighter && brawlWave > 0.78) {
+            const sparkX = Math.round(centerX + 14);
+            const sparkY = Math.round(laneBaseY + 12 - jumpKick * 0.4);
+            ctx.fillStyle = pal.pixel_highlight;
+            ctx.fillRect(sparkX - 5, sparkY - 1, 11, 3);
+            ctx.fillRect(sparkX - 1, sparkY - 5, 3, 11);
+            ctx.fillStyle = "#ffffff";
+            ctx.fillRect(sparkX - 2, sparkY - 2, 5, 5);
+          }
+        } else if (activeStyle === 'side_scroller' && (behavior === 'dancers' || behavior === 'scroll' || behavior === 'bounce')) {
+          // In Side-Scroller mode, characters run and jump at a relaxed, rhythmic pace
+          actor.x += Math.abs(actor.vx) * (0.55 + smoothBass * 0.35);
           if (actor.x > W + 16) actor.x = -32;
           drawX = actor.x;
-          const jumpArc = Math.floor(Math.abs(Math.sin(frameTick * 0.11 + i * 1.3)) * (10 + bass * 24));
+          const jumpArc = Math.floor(Math.abs(Math.sin(frameTick * 0.045 + i * 1.3)) * (8 + smoothBass * 10));
           drawY = (horizonY - 32) - jumpArc;
           flipX = false;
         } else if (behavior === 'bounce') {
-          actor.x += actor.vx * (1 + bass * 1.5);
+          actor.x += actor.vx * (0.55 + smoothBass * 0.35);
           if (actor.x < 12 || actor.x > W - 44) actor.vx *= -1;
           drawX = actor.x;
-          drawY = (horizonY - 38) - Math.abs(Math.sin(frameTick * 0.09 + actor.phase)) * (18 + bass * 28);
+          drawY = (horizonY - 38) - Math.abs(Math.sin(frameTick * 0.045 + actor.phase)) * (12 + smoothBass * 10);
           flipX = actor.vx < 0;
         } else if (behavior === 'scroll') {
-          actor.x -= (1.1 + bass * 2.4);
+          actor.x -= (0.6 + smoothBass * 0.45);
           if (actor.x < -36) actor.x = W + 20;
           drawX = actor.x;
-          drawY = horizonY - 26 + Math.sin(frameTick * 0.12 + actor.phase) * 3;
+          drawY = horizonY - 26 + Math.sin(frameTick * 0.05 + actor.phase) * 2.5;
         } else if (behavior === 'rain') {
-          actor.y += (1.0 + treble * 2.5);
+          actor.y += (0.55 + smoothTreble * 0.65);
           if (actor.y > H - 20) {
             actor.y = -24;
             actor.x = (actor.x + 53) % (W - 32);
@@ -1207,13 +1434,13 @@
           drawY = actor.y;
         } else if (behavior === 'dancers') {
           drawX = 28 + i * 36;
-          const jump = Math.floor(Math.abs(Math.sin(frameTick * 0.15 + i)) * (8 + bass * 22));
+          const jump = Math.floor(Math.abs(Math.sin(frameTick * 0.055 + i)) * (6 + smoothBass * 8));
           drawY = horizonY - 28 - jump;
-          flipX = Math.floor(frameTick / 15 + i) % 2 === 0;
+          flipX = Math.floor(frameTick / 32 + i) % 2 === 0;
         } else {
           // 'float' or 'starfield'
-          drawX = actor.x + Math.sin(frameTick * 0.04 + actor.phase) * 18;
-          drawY = 20 + (i * 16) % Math.max(24, horizonY - 45) + Math.cos(frameTick * 0.06 + actor.phase) * (8 + mid * 14);
+          drawX = actor.x + Math.sin(frameTick * 0.025 + actor.phase) * 14;
+          drawY = 20 + (i * 16) % Math.max(24, horizonY - 45) + Math.cos(frameTick * 0.03 + actor.phase) * (6 + smoothMid * 6);
         }
 
         drawPixelMatrix(spriteDef.matrix, drawX, drawY, scale, colorLookup, flipX);
@@ -1251,9 +1478,20 @@
         document.getElementById('telemetryDjs').textContent = djs;
       }
 
-      // Public URL & QR
-      if (state.public_url) {
-        const lbl = document.getElementById('publicUrlLabel');
+      // Public URL & QR (or Wi-Fi Setup Hotspot QR if Pi is in Captive Portal mode)
+      const wifiSt = state.wifi_status || {};
+      const qrHeader = document.getElementById('qrBoxHeaderTitle');
+      const lbl = document.getElementById('publicUrlLabel');
+      if (wifiSt.hotspot_active) {
+        if (qrHeader) qrHeader.textContent = 'SETUP VENUE WI-FI!';
+        const setupLabel = `WIFI: ${wifiSt.setup_ssid || '8BIT-JUKEBOX-SETUP'}`;
+        if (lbl.textContent !== setupLabel) {
+          lbl.textContent = setupLabel;
+          const qrPayload = wifiSt.wifi_qr_payload || 'WIFI:S:8BIT-JUKEBOX-SETUP;T:nopass;;';
+          document.getElementById('qrCodeImg').src = `/api/qrcode?url=${encodeURIComponent(qrPayload)}&t=${Date.now()}`;
+        }
+      } else if (state.public_url) {
+        if (qrHeader) qrHeader.textContent = 'JOIN THE PARTY!';
         const cleanLabel = state.public_url.replace(/^https?:\/\//, '');
         if (lbl.textContent !== cleanLabel) {
           lbl.textContent = cleanLabel;
@@ -1341,8 +1579,16 @@
     }
 
     function handleHostTransportControl(msg) {
+      if (msg.control === 'reload_bigscreen') {
+        location.reload();
+        return;
+      }
       if (msg.control === 'set_viz_mode' && msg.viz_mode) {
         setVizModeById(msg.viz_mode);
+        return;
+      }
+      if (msg.control === 'set_volume' && msg.volume_pct) {
+        setMasterVolumePct(msg.volume_pct);
         return;
       }
       ensureAudioUnlocked();
@@ -1391,6 +1637,8 @@
     window.addEventListener('message', (e) => {
       if (e.data && e.data.type === 'set_viz_mode' && e.data.viz_mode) {
         setVizModeById(e.data.viz_mode);
+      } else if (e.data && e.data.type === 'set_volume' && e.data.volume_pct) {
+        setMasterVolumePct(e.data.volume_pct);
       }
     });
 

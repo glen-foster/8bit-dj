@@ -69,6 +69,7 @@ class ArcadeSceneSchema(BaseModel):
         description=(
             "Retro visualizer background style best fitting this song: "
             "'side_scroller' (16-bit platformer world with clouds, blocks, and ground—great when sprites include characters, dancers, animals, or walkers), "
+            "'beat_em_up' (90s arcade belt-scroller street brawler alley with neon signs, burning barrels, 1P vs BOSS health bars & brawling fighters—great for hip-hop, rock, punk, action, or battle anthems), "
             "'winamp_analyzer' (classic 90s Winamp segmented LED spectrum bars with peak-hold caps + live oscilloscope waveform), "
             "'winamp_fire' (demoscene plasma/fire equalizer bars with rising ember particles—great for high-energy/rock/electronic tracks), "
             "'city_cruiser' (parallax midnight city skyline with twinkling windows & highway—great for pop, soul, R&B, funk, night drives), "
@@ -220,7 +221,7 @@ def build_fallback_scene(video_id: str, title: str, artist: str) -> Dict[str, An
         f"WARNING: {artist.upper()} has entered the neon cyber-grid with '{title}'!",
     ]
 
-    bg_styles = ["side_scroller", "winamp_analyzer", "winamp_fire", "city_cruiser", "synth_grid"]
+    bg_styles = ["side_scroller", "beat_em_up", "winamp_analyzer", "winamp_fire", "city_cruiser", "synth_grid"]
     return {
         "stage_title": f"STAGE {stage_num:02d}: {clean_title} ARENA",
         "flavor_text": flavor_options[digest % len(flavor_options)],
@@ -381,7 +382,7 @@ CRITICAL INSTRUCTIONS FOR CREATIVITY, VARIETY & THEMATIC ACCURACY:
         sprites = build_fallback_scene(video_id, title, artist)["sprites"]
 
     palette = data.get("palette", {})
-    valid_bg_styles = {"side_scroller", "winamp_analyzer", "winamp_fire", "city_cruiser", "synth_grid"}
+    valid_bg_styles = {"side_scroller", "beat_em_up", "winamp_analyzer", "winamp_fire", "city_cruiser", "synth_grid"}
     raw_bg = str(data.get("bg_style", "")).lower().strip()
     if raw_bg not in valid_bg_styles:
         has_characters = any(s.get("behavior") in ("dancers", "scroll") for s in sprites)

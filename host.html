@@ -177,6 +177,13 @@
             SIDE-SCROLLER
           </button>
           <button
+            data-viz="beat_em_up"
+            onclick="setHostVizMode('beat_em_up', 'BEAT-EM-UP')"
+            class="arcade-btn px-2.5 py-2 bg-[#1b113a] text-[#00f5d4] text-[8px] flex-1 sm:flex-initial"
+          >
+            BEAT-EM-UP
+          </button>
+          <button
             data-viz="winamp_analyzer"
             onclick="setHostVizMode('winamp_analyzer', 'WINAMP LED')"
             class="arcade-btn px-2.5 py-2 bg-[#1b113a] text-[#00f5d4] text-[8px] flex-1 sm:flex-initial"
@@ -203,6 +210,41 @@
             class="arcade-btn px-2.5 py-2 bg-[#1b113a] text-[#00f5d4] text-[8px] flex-1 sm:flex-initial"
           >
             SYNTH GRID
+          </button>
+        </div>
+      </div>
+
+      <!-- TV Master Volume Boost Controller -->
+      <div class="pt-3 border-t-2 border-pink-900/60 flex flex-wrap items-center justify-between gap-2">
+        <div class="text-[9px] text-gray-400">TV VOLUME BOOST:</div>
+        <div id="hostVolButtons" class="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+          <button
+            data-vol="80"
+            onclick="setHostVolume(80)"
+            class="arcade-btn px-2.5 py-2 bg-[#1b113a] text-[#00f5d4] text-[8px] flex-1 sm:flex-initial"
+          >
+            80%
+          </button>
+          <button
+            data-vol="125"
+            onclick="setHostVolume(125)"
+            class="arcade-btn px-2.5 py-2 bg-[#1b113a] text-[#00f5d4] text-[8px] flex-1 sm:flex-initial"
+          >
+            125%
+          </button>
+          <button
+            data-vol="185"
+            onclick="setHostVolume(185)"
+            class="arcade-btn px-2.5 py-2 bg-emerald-400 text-black text-[8px] flex-1 sm:flex-initial"
+          >
+            185% (LOUD)
+          </button>
+          <button
+            data-vol="250"
+            onclick="setHostVolume(250)"
+            class="arcade-btn px-2.5 py-2 bg-[#1b113a] text-[#00f5d4] text-[8px] flex-1 sm:flex-initial"
+          >
+            250% (MAX)
           </button>
         </div>
       </div>
@@ -249,29 +291,77 @@
       </section>
     </div>
 
-    <!-- Row 3: Load YouTube Music Seed Playlist ID -->
-    <section class="host-panel p-5">
-      <div class="text-xs text-[#00f5d4] mb-2">SEED PLAYLIST LOADER (YOUTUBE MUSIC)</div>
-      <p class="text-[9px] text-gray-300 leading-relaxed mb-4">
-        LOAD A YOUTUBE MUSIC PLAYLIST ID (E.G. PL...) OR URL TO POPULATE THE AUTO-DJ IDLE POOL &amp; MOBILE FAST-TRACK LIST.
-      </p>
-      <form onsubmit="loadSeedPlaylist(event)" class="flex flex-col sm:flex-row gap-3">
+    <!-- Row 3: Search or Load YouTube Music Seed Playlist -->
+    <section class="host-panel p-5 space-y-4">
+      <div>
+        <div class="text-xs text-[#00f5d4] mb-2">SEED PLAYLIST LOADER (YOUTUBE MUSIC)</div>
+        <p class="text-[9px] text-gray-300 leading-relaxed">
+          SEARCH FOR ANY PLAYLIST BY VIBE/GENRE (E.G. &quot;80S PARTY&quot;, &quot;90S ROCK&quot;, &quot;DISCO&quot;) OR PASTE A PLAYLIST ID TO POPULATE THE QUEUE &amp; FAST-TRACK LIST!
+        </p>
+      </div>
+
+      <!-- Search Playlists by Name -->
+      <form onsubmit="searchHostPlaylists(event)" class="flex flex-col sm:flex-row gap-3">
+        <input
+          id="playlistSearchInput"
+          type="text"
+          placeholder="SEARCH PLAYLISTS (E.G. 80S HITS, INDIE PARTY, 90S HIP HOP)..."
+          class="flex-1 bg-black border-2 border-amber-400 px-3 py-3 text-[10px] text-white focus:outline-none"
+        />
+        <button
+          id="searchPlaylistBtn"
+          type="submit"
+          class="arcade-btn px-5 py-3 bg-amber-400 text-black text-[10px] shrink-0"
+        >
+          SEARCH PLAYLISTS
+        </button>
+      </form>
+
+      <!-- Playlist Search Results -->
+      <div id="playlistSearchResults" class="hidden grid grid-cols-1 md:grid-cols-2 gap-2.5 max-h-72 overflow-y-auto pt-1"></div>
+
+      <!-- Or Direct Playlist ID / URL Input -->
+      <form onsubmit="loadSeedPlaylist(event)" class="flex flex-col sm:flex-row gap-3 pt-2 border-t border-gray-800">
         <input
           id="playlistIdInput"
           type="text"
-          placeholder="YOUTUBE MUSIC PLAYLIST ID OR URL..."
-          class="flex-1 bg-black border-2 border-[#00f5d4] px-3 py-3 text-[10px] text-white focus:outline-none"
+          placeholder="OR PASTE YOUTUBE MUSIC PLAYLIST ID / URL..."
+          class="flex-1 bg-black border-2 border-[#00f5d4] px-3 py-2.5 text-[9px] text-white focus:outline-none"
         />
         <button
           id="loadPlaylistBtn"
           type="submit"
-          class="arcade-btn px-5 py-3 bg-[#00f5d4] text-black text-[10px] shrink-0"
+          class="arcade-btn px-4 py-2.5 bg-[#1b113a] text-[#00f5d4] text-[9px] shrink-0"
         >
-          LOAD SEED PLAYLIST
+          LOAD BY ID/URL
         </button>
       </form>
-      <div id="seedPoolSummary" class="mt-3 text-[9px] text-gray-400">
+      <div id="seedPoolSummary" class="text-[9px] text-gray-400">
         CURRENT SEED POOL: 8 PRE-VALIDATED TRACKS
+      </div>
+    </section>
+
+    <!-- Row 4: Venue Wi-Fi & Captive Portal Setup -->
+    <section class="host-panel p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+      <div>
+        <div class="text-xs text-amber-300 mb-1">VENUE WI-FI &amp; CAPTIVE PORTAL SETUP</div>
+        <div id="hostWifiStatusText" class="text-[9px] text-gray-300">
+          CHECKING RASPBERRY PI WI-FI STATUS...
+        </div>
+      </div>
+      <div class="flex flex-wrap items-center gap-3 w-full sm:w-auto">
+        <a
+          href="/wifi-setup"
+          class="arcade-btn px-4 py-2.5 bg-[#00f5d4] text-black text-[9px] text-center flex-1 sm:flex-initial"
+        >
+          OPEN WI-FI PICKER
+        </a>
+        <button
+          onclick="toggleSetupHotspot(true)"
+          class="arcade-btn px-4 py-2.5 bg-pink-600 hover:bg-pink-500 text-white text-[9px] flex-1 sm:flex-initial"
+        >
+          START SETUP HOTSPOT
+        </button>
       </div>
     </section>
   </div>
@@ -439,6 +529,34 @@
         document.getElementById('seedPoolSummary').textContent =
           `CURRENT SEED POOL: ${state.seed_pool.length} PRE-VALIDATED TRACKS READY FOR FAST-TRACK & IDLE PLAY`;
       }
+
+      if (state.wifi_status) {
+        const ws = state.wifi_status;
+        const wEl = document.getElementById('hostWifiStatusText');
+        if (wEl) {
+          if (ws.hotspot_active) {
+            wEl.textContent = `SETUP HOTSPOT ACTIVE: JOIN '${ws.setup_ssid}' ON PHONE`;
+          } else if (ws.connected_ssid) {
+            wEl.textContent = `CONNECTED TO WI-FI: ${ws.connected_ssid} (AUTO-FALLBACK TO '${ws.setup_ssid}' ENABLED)`;
+          } else {
+            wEl.textContent = `AUTO-FALLBACK HOTSPOT: '${ws.setup_ssid}' READY`;
+          }
+        }
+      }
+    }
+
+    async function toggleSetupHotspot(enable) {
+      try {
+        const res = await fetch('/api/wifi/hotspot', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pin: hostPin, enable: !!enable })
+        });
+        const data = await res.json();
+        showHostToast(data.message || (enable ? "HOTSPOT STARTED!" : "HOTSPOT STOPPED!"));
+      } catch (e) {
+        showHostToast("HOTSPOT SWITCHING IN PROGRESS...");
+      }
     }
 
     async function triggerVetoSkip() {
@@ -495,6 +613,77 @@
       showHostToast(`VISUALIZER SET TO: ${label}`);
     }
 
+    async function setHostVolume(volPct) {
+      document.querySelectorAll('#hostVolButtons button').forEach(btn => {
+        if (Number(btn.getAttribute('data-vol')) === Number(volPct)) {
+          btn.className = 'arcade-btn px-2.5 py-2 bg-emerald-400 text-black text-[8px] flex-1 sm:flex-initial';
+        } else {
+          btn.className = 'arcade-btn px-2.5 py-2 bg-[#1b113a] text-[#00f5d4] text-[8px] flex-1 sm:flex-initial';
+        }
+      });
+
+      try {
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage({ type: 'set_volume', volume_pct: volPct }, '*');
+        }
+      } catch (err) {}
+
+      await sendTransportControl(`set_volume:${volPct}`, 0);
+      showHostToast(`TV VOLUME BOOST: ${volPct}%`);
+    }
+
+    async function searchHostPlaylists(e) {
+      e.preventDefault();
+      const q = document.getElementById('playlistSearchInput').value.trim();
+      if (!q) return;
+      const btn = document.getElementById('searchPlaylistBtn');
+      const container = document.getElementById('playlistSearchResults');
+      btn.textContent = 'SEARCHING...';
+      btn.disabled = true;
+      container.classList.remove('hidden');
+      container.innerHTML = `<div class="col-span-full text-[9px] text-amber-300 py-3 text-center">SEARCHING YOUTUBE MUSIC PLAYLISTS...</div>`;
+
+      try {
+        const res = await fetch(`/api/host/search_playlists?q=${encodeURIComponent(q)}&pin=${encodeURIComponent(hostPin)}`);
+        const data = await res.json();
+        const items = data.results || [];
+        if (items.length === 0) {
+          container.innerHTML = `<div class="col-span-full text-[9px] text-gray-400 py-3 text-center">NO PLAYLISTS FOUND FOR "${escapeHtml(q)}".</div>`;
+          return;
+        }
+        container.innerHTML = items.map(pl => `
+          <div class="p-2.5 bg-black/85 border-2 border-gray-700 hover:border-amber-400 flex items-center justify-between gap-2.5">
+            <div class="flex items-center gap-2.5 min-w-0 flex-1">
+              ${pl.thumbnail ? `<img src="${escapeHtml(pl.thumbnail)}" class="w-10 h-10 object-cover border border-white shrink-0" />` : ''}
+              <div class="min-w-0 flex-1">
+                <div class="text-[9px] text-white truncate mb-1">${escapeHtml(pl.title)}</div>
+                <div class="text-[8px] text-gray-400 truncate">
+                  ${escapeHtml(pl.author)}${pl.item_count ? ' // ' + escapeHtml(pl.item_count) + ' TRACKS' : ''}
+                </div>
+              </div>
+            </div>
+            <button
+              type="button"
+              onclick="loadPlaylistById('${escapeHtml(pl.playlist_id)}', '${escapeHtml(pl.title).replace(/'/g, "\\'")}')"
+              class="arcade-btn px-3 py-2 bg-[#00f5d4] text-black text-[8px] shrink-0"
+            >
+              LOAD
+            </button>
+          </div>
+        `).join('');
+      } catch (err) {
+        container.innerHTML = `<div class="col-span-full text-[9px] text-red-400 py-3 text-center">PLAYLIST SEARCH FAILED.</div>`;
+      } finally {
+        btn.textContent = 'SEARCH PLAYLISTS';
+        btn.disabled = false;
+      }
+    }
+
+    async function loadPlaylistById(playlistId, titleLabel = '') {
+      document.getElementById('playlistIdInput').value = playlistId;
+      await loadSeedPlaylist(null, playlistId, titleLabel);
+    }
+
     async function hostQueueAction(action, queueId) {
       try {
         const res = await fetch('/api/host/action', {
@@ -513,13 +702,14 @@
       }
     }
 
-    async function loadSeedPlaylist(e) {
-      e.preventDefault();
-      const playlistId = document.getElementById('playlistIdInput').value.trim();
+    async function loadSeedPlaylist(e, explicitId = null, titleLabel = '') {
+      if (e) e.preventDefault();
+      const playlistId = (explicitId || document.getElementById('playlistIdInput').value).trim();
       if (!playlistId) return;
       const btn = document.getElementById('loadPlaylistBtn');
       btn.textContent = "LOADING...";
       btn.disabled = true;
+      showHostToast(titleLabel ? `LOADING "${titleLabel.toUpperCase()}"...` : "LOADING SEED PLAYLIST...");
 
       try {
         const res = await fetch('/api/host/action', {
@@ -541,7 +731,7 @@
       } catch (err) {
         showHostToast("ERROR LOADING PLAYLIST");
       } finally {
-        btn.textContent = "LOAD SEED PLAYLIST";
+        btn.textContent = "LOAD BY ID/URL";
         btn.disabled = false;
       }
     }

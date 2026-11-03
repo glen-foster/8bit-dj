@@ -341,8 +341,76 @@ def get_client_voted_ids(client_id: str) -> List[int]:
         return [r["queue_id"] for r in rows]
 
 
-def get_active_queue() -> List[Dict[str, Any]]:
-    """Returns queued tracks ordered by votes DESC, random tie_breaker DESC."""
+def ensure_minimum_queue_size(min_count: int = 5) -> None:
+    """
+    Ensures the active queue (`status = 'queued'`) always contains at least `min_count`
+    tracks by topping it up from `seed_tracks` (`is_seed = 1`, `votes = 0`).
+    """
+    ensure_user("system_seed", "8BIT_AUTODJ")
+    with get_conn() as conn:
+        current_rows = conn.execute(
+            "SELECT video_id FROM queue WHERE status = 'queued'"
+        ).fetchall()
+        current_count = len(current_rows)
+        if current_count >= min_count:
+            return
+
+        needed = min_count - current_count
+        active_or_playing = {
+            r["video_id"]
+            for r in conn.execute(
+                "SELECT video_id FROM queue WHERE status IN ('queued', 'playing', 'pending_approval')"
+            ).fetchall()
+        }
+        recent_played = {
+            r["video_id"]
+            for r in conn.execute(
+                "SELECT video_id FROM queue WHERE status = 'played' ORDER BY played_at DESC LIMIT 8"
+            ).fetchall()
+        }
+
+        all_seeds = [dict(r) for r in conn.execute("SELECT * FROM seed_tracks").fetchall()]
+        if not all_seeds:
+            return
+
+        # 1st preference: not active and not recently played
+        candidates = [
+            s for s in all_seeds
+            if s["video_id"] not in active_or_playing and s["video_id"] not in recent_played
+        ]
+        # 2nd preference: not currently active/queued/playing
+        if len(candidates) < needed:
+            extra = [
+                s for s in all_seeds
+                if s["video_id"] not in active_or_playing and s not in candidates
+            ]
+            candidates.extend(extra)
+
+        random.shuffle(candidates)
+        for seed in candidates[:needed]:
+            conn.execute(
+                """
+                INSERT INTO queue (
+                    video_id, title, artist, duration, thumbnail,
+                    requested_by_id, requested_by_name, status, votes, tie_breaker, is_seed
+                ) VALUES (?, ?, ?, ?, ?, 'system_seed', '8BIT_AUTODJ', 'queued', 0, ?, 1)
+                """,
+                (
+                    seed["video_id"],
+                    seed["title"],
+                    seed["artist"],
+                    seed.get("duration") or 210,
+                    seed.get("thumbnail") or "",
+                    random.random(),
+                ),
+            )
+        conn.commit()
+
+
+def get_active_queue(min_seed_fill: int = 5) -> List[Dict[str, Any]]:
+    """Returns queued tracks ordered by votes DESC, random tie_breaker DESC, topping up with seed tracks if below `min_seed_fill`."""
+    if min_seed_fill > 0:
+        ensure_minimum_queue_size(min_seed_fill)
     with get_conn() as conn:
         rows = conn.execute(
             """
@@ -566,9 +634,14 @@ def replace_seed_pool(tracks: List[Dict[str, Any]], playlist_id: str) -> int:
                 ),
             )
             inserted += 1
+        # Clear unvoted auto-DJ seed tracks from the active queue so 5 tracks from the new playlist fill in immediately
+        conn.execute(
+            "DELETE FROM queue WHERE status = 'queued' AND is_seed = 1 AND votes = 0"
+        )
         rotate_next_seed(conn)
         conn.commit()
-        return inserted
+    ensure_minimum_queue_size(5)
+    return inserted
 
 
 def update_audio_status(video_id: str, status: str, audio_file: str = "") -> None:

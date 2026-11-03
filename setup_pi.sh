@@ -93,12 +93,19 @@ sudo systemctl daemon-reload
 sudo systemctl enable "${SERVICE_NAME}"
 sudo systemctl restart "${SERVICE_NAME}"
 
-# 4. Configure Wayfire (~/.config/wayfire.ini) for Chromium Kiosk Auto-Start
-echo "[4/5] Configuring ~/.config/wayfire.ini for HDMI Big Screen Kiosk mode..."
+# 4. Configure Desktop Autologin & Kiosk Auto-Start (labwc + wayfire + XDG autostart)
+echo "[4/5] Configuring HDMI Desktop Autologin & Big Screen Kiosk mode..."
+if command -v raspi-config >/dev/null 2>&1; then
+  sudo raspi-config nonint do_boot_behaviour B4 || true
+fi
+
 WAYFIRE_DIR="${USER_HOME}/.config"
 WAYFIRE_INI="${WAYFIRE_DIR}/wayfire.ini"
-mkdir -p "${WAYFIRE_DIR}"
-touch "${WAYFIRE_INI}"
+LABWC_DIR="${USER_HOME}/.config/labwc"
+LABWC_AUTOSTART="${LABWC_DIR}/autostart"
+XDG_AUTOSTART_DIR="${USER_HOME}/.config/autostart"
+mkdir -p "${WAYFIRE_DIR}" "${LABWC_DIR}" "${XDG_AUTOSTART_DIR}"
+touch "${WAYFIRE_INI}" "${LABWC_AUTOSTART}"
 
 # Resolve chromium binary name
 CHROMIUM_BIN="chromium-browser"
@@ -108,6 +115,13 @@ fi
 
 KIOSK_CMD="${CHROMIUM_BIN} --kiosk --autoplay-policy=no-user-gesture-required --noerrdialogs --disable-infobars --check-for-update-interval=31536000 http://localhost:${PORT}/bigscreen"
 
+# Configure labwc autostart (Bookworm default compositor)
+if ! grep -q "http://localhost:${PORT}/bigscreen" "${LABWC_AUTOSTART}"; then
+  echo "${KIOSK_CMD} &" >> "${LABWC_AUTOSTART}"
+fi
+chmod +x "${LABWC_AUTOSTART}"
+
+# Configure Wayfire (older Bookworm compositor)
 if ! grep -q "\[autostart\]" "${WAYFIRE_INI}"; then
   cat >> "${WAYFIRE_INI}" <<EOF
 
