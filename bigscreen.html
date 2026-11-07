@@ -163,7 +163,13 @@
           <span class="text-xs highlight-text">HOST COMMAND CONSOLE</span>
         </div>
         <div class="flex items-center gap-3">
-          <span class="text-[9px] text-gray-400">PRESS [ESC] OR [H] TO CLOSE</span>
+          <span class="text-[9px] text-gray-400 hidden sm:inline">PRESS [ESC] OR [H] TO CLOSE</span>
+          <button
+            onclick="minimizeKioskFromBigscreen()"
+            class="px-3 py-1.5 bg-amber-400 hover:bg-amber-300 border-2 border-white text-black text-[10px]"
+          >
+            [ _ MINIMIZE TO DESKTOP ]
+          </button>
           <button
             onclick="toggleHostModal(false)"
             class="px-3 py-1.5 bg-red-600 hover:bg-red-500 border-2 border-white text-white text-[10px]"
@@ -1610,6 +1616,12 @@
         location.reload();
         return;
       }
+      if (msg.control === 'exit_fullscreen') {
+        if (document.fullscreenElement) {
+          document.exitFullscreen().catch(() => {});
+        }
+        return;
+      }
       if (msg.control === 'set_viz_mode' && msg.viz_mode) {
         setVizModeById(msg.viz_mode);
         return;
@@ -1643,6 +1655,19 @@
         currentEl.currentTime = 0;
         if (currentEl.paused) currentEl.play().catch(() => {});
       }
+    }
+
+    async function minimizeKioskFromBigscreen() {
+      if (document.fullscreenElement) {
+        document.exitFullscreen().catch(() => {});
+      }
+      try {
+        await fetch('/api/host/action', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pin: '', action: 'minimize_kiosk' })
+        });
+      } catch (err) {}
     }
 
     function toggleHostModal(forceState = null) {

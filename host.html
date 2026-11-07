@@ -109,7 +109,21 @@
         <span class="px-2 py-0.5 bg-[#00f5d4] text-black text-[8px]">ADMIN</span>
         <h1 class="text-[11px] md:text-xs text-[#00f5d4]">8-BIT JUKEBOX COMMAND CENTER</h1>
       </div>
-      <div class="flex items-center gap-2">
+      <div class="flex flex-wrap items-center gap-1.5">
+        <button
+          onclick="sendTransportControl('minimize_kiosk', 0)"
+          title="Minimize Big Screen to Raspberry Pi OS Desktop"
+          class="arcade-btn px-2.5 py-1 bg-amber-400 hover:bg-amber-300 text-black text-[8px]"
+        >
+          _ MINIMIZE TO DESKTOP
+        </button>
+        <button
+          onclick="sendTransportControl('fullscreen_kiosk', 0)"
+          title="Restore Big Screen to Fullscreen"
+          class="arcade-btn px-2 py-1 bg-[#1b113a] hover:bg-indigo-900 text-[#00f5d4] text-[8px]"
+        >
+          [ ] FULLSCREEN
+        </button>
         <span id="hostWsStatus" class="px-2 py-1 bg-emerald-900/60 border border-emerald-400 text-[8px] text-emerald-300">
           WS: CONNECTED
         </span>
@@ -381,6 +395,12 @@
           class="arcade-btn px-3 py-1.5 bg-pink-600 hover:bg-pink-500 text-white text-[8px] flex-1 sm:flex-initial"
         >
           START SETUP HOTSPOT
+        </button>
+        <button
+          onclick="sendTransportControl('minimize_kiosk', 0)"
+          class="arcade-btn px-3 py-1.5 bg-amber-400 hover:bg-amber-300 text-black text-[8px] flex-1 sm:flex-initial"
+        >
+          _ MINIMIZE TO PI DESKTOP
         </button>
       </div>
     </section>

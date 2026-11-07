@@ -30,7 +30,9 @@ sudo apt-get install -y \
   python3-pip \
   curl \
   sqlite3 \
-  unclutter
+  unclutter \
+  wlrctl \
+  wtype
 
 # Install chromium-browser (or chromium on Debian Bookworm)
 if apt-cache show chromium-browser >/dev/null 2>&1; then
@@ -113,7 +115,7 @@ if ! command -v chromium-browser >/dev/null 2>&1 && command -v chromium >/dev/nu
   CHROMIUM_BIN="chromium"
 fi
 
-KIOSK_CMD="${CHROMIUM_BIN} --kiosk --autoplay-policy=no-user-gesture-required --noerrdialogs --disable-infobars --check-for-update-interval=31536000 http://localhost:${PORT}/bigscreen"
+KIOSK_CMD="${CHROMIUM_BIN} --start-fullscreen --password-store=basic --autoplay-policy=no-user-gesture-required --noerrdialogs --disable-infobars --check-for-update-interval=31536000 --app=http://localhost:${PORT}/bigscreen"
 
 # Configure labwc autostart (Bookworm default compositor)
 if ! grep -q "http://localhost:${PORT}/bigscreen" "${LABWC_AUTOSTART}"; then

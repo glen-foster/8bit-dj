@@ -156,6 +156,53 @@ def set_system_volume(vol_pct: int) -> int:
     return clamped
 
 
+def manage_kiosk_window(mode: str = "minimize") -> bool:
+    """
+    Controls the Raspberry Pi Wayland (labwc) Chromium kiosk window via `wlrctl`:
+    - `mode == 'minimize'`: minimizes Chromium so the Pi desktop & Wi-Fi bar are visible.
+    - `mode == 'fullscreen'`: focuses and restores Chromium to fullscreen.
+    """
+    wlrctl_bin = shutil.which("wlrctl")
+    if not wlrctl_bin:
+        return False
+    uid = os.getuid()
+    runtime_dirs = [f"/run/user/{uid}", "/run/user/1000"]
+    match_args = ["app_id:chromium", "app_id:chrome-localhost__bigscreen-Default"]
+    ok = False
+    for rdir in dict.fromkeys(runtime_dirs):
+        if Path(rdir).exists():
+            env = dict(os.environ, XDG_RUNTIME_DIR=rdir, WAYLAND_DISPLAY="wayland-0")
+            try:
+                if mode == "minimize":
+                    res = subprocess.run(
+                        [wlrctl_bin, "toplevel", "minimize", *match_args],
+                        env=env,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        timeout=3,
+                    )
+                    ok = ok or (res.returncode == 0)
+                elif mode == "fullscreen":
+                    subprocess.run(
+                        [wlrctl_bin, "toplevel", "focus", *match_args],
+                        env=env,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        timeout=3,
+                    )
+                    res = subprocess.run(
+                        [wlrctl_bin, "toplevel", "fullscreen", *match_args],
+                        env=env,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        timeout=3,
+                    )
+                    ok = ok or (res.returncode == 0)
+            except Exception as exc:
+                logger.debug(f"wlrctl ({mode}) warning: {exc}")
+    return ok
+
+
 def get_lan_ip() -> str:
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -792,6 +839,20 @@ async def api_host_action(req: HostActionRequest, request: Request) -> Dict[str,
             prefetch_engine.trigger_Pass()
         await broadcast_state()
         return {"ok": True, "message": f"CLEARED {cleared} CACHED AI SCENES! REGENERATING..."}
+
+    elif req.action == "minimize_kiosk":
+        await asyncio.to_thread(manage_kiosk_window, "minimize")
+        await ws_manager.broadcast_json(
+            {
+                "type": "host_transport_control",
+                "control": "exit_fullscreen",
+            }
+        )
+        return {"ok": True, "message": "KIOSK MINIMIZED TO RASPBERRY PI DESKTOP!"}
+
+    elif req.action == "fullscreen_kiosk":
+        await asyncio.to_thread(manage_kiosk_window, "fullscreen")
+        return {"ok": True, "message": "RESTORED BIG SCREEN TO FULLSCREEN!"}
 
     elif req.action == "load_playlist" and req.playlist_id:
         try:
