@@ -160,7 +160,7 @@ def set_system_volume(vol_pct: int) -> int:
 def manage_kiosk_window(mode: str = "minimize") -> bool:
     """
     Controls the Raspberry Pi Wayland (labwc) Chromium kiosk window via `wlrctl`:
-    - `mode == 'minimize'`: minimizes Chromium so the Pi desktop & Wi-Fi bar are visible.
+    - `mode == 'minimize'`: unfullscreens and minimizes Chromium so the Pi desktop & Wi-Fi bar are visible.
     - `mode == 'fullscreen'`: focuses and restores Chromium to fullscreen.
     """
     wlrctl_bin = shutil.which("wlrctl")
@@ -168,39 +168,57 @@ def manage_kiosk_window(mode: str = "minimize") -> bool:
         return False
     uid = os.getuid()
     runtime_dirs = [f"/run/user/{uid}", "/run/user/1000"]
-    match_args = ["app_id:chromium", "app_id:chrome-localhost__bigscreen-Default"]
+    selectors = [
+        "app_id:chromium",
+        "app_id:chromium-browser",
+        "app_id:Chromium",
+        "app_id:Chromium-browser",
+        "state:fullscreen",
+    ]
     ok = False
     for rdir in dict.fromkeys(runtime_dirs):
         if Path(rdir).exists():
             env = dict(os.environ, XDG_RUNTIME_DIR=rdir, WAYLAND_DISPLAY="wayland-0")
-            try:
-                if mode == "minimize":
-                    res = subprocess.run(
-                        [wlrctl_bin, "toplevel", "minimize", *match_args],
-                        env=env,
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL,
-                        timeout=3,
-                    )
-                    ok = ok or (res.returncode == 0)
-                elif mode == "fullscreen":
-                    subprocess.run(
-                        [wlrctl_bin, "toplevel", "focus", *match_args],
-                        env=env,
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL,
-                        timeout=3,
-                    )
-                    res = subprocess.run(
-                        [wlrctl_bin, "toplevel", "fullscreen", *match_args],
-                        env=env,
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL,
-                        timeout=3,
-                    )
-                    ok = ok or (res.returncode == 0)
-            except Exception as exc:
-                logger.debug(f"wlrctl ({mode}) warning: {exc}")
+            for sel in selectors:
+                try:
+                    if mode == "minimize":
+                        subprocess.run(
+                            [wlrctl_bin, "toplevel", "unfullscreen", sel],
+                            env=env,
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL,
+                            timeout=2,
+                        )
+                        res = subprocess.run(
+                            [wlrctl_bin, "toplevel", "minimize", sel],
+                            env=env,
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL,
+                            timeout=2,
+                        )
+                        if res.returncode == 0:
+                            ok = True
+                            break
+                    elif mode == "fullscreen":
+                        subprocess.run(
+                            [wlrctl_bin, "toplevel", "focus", sel],
+                            env=env,
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL,
+                            timeout=2,
+                        )
+                        res = subprocess.run(
+                            [wlrctl_bin, "toplevel", "fullscreen", sel],
+                            env=env,
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL,
+                            timeout=2,
+                        )
+                        if res.returncode == 0:
+                            ok = True
+                            break
+                except Exception as exc:
+                    logger.debug(f"wlrctl ({mode}, {sel}) warning: {exc}")
     return ok
 
 

@@ -18,4 +18,4 @@ if command -v chromium-browser >/dev/null 2>&1; then
   CHROMIUM_BIN="chromium-browser"
 fi
 
-exec "${CHROMIUM_BIN}" --start-fullscreen --password-store=basic --autoplay-policy=no-user-gesture-required --noerrdialogs --disable-infobars --check-for-update-interval=31536000 --app=http://localhost:8000/bigscreen
+exec "${CHROMIUM_BIN}" --kiosk --password-store=basic --autoplay-policy=no-user-gesture-required --noerrdialogs --disable-infobars --check-for-update-interval=31536000 http://localhost:8000/bigscreen
