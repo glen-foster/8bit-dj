@@ -232,15 +232,19 @@ def _download_and_normalize_sync(video_id: str) -> Path:
     if existing:
         return existing
 
-    venv_ytdlp = Path(sys.executable).parent / "yt-dlp"
-    ytdlp_bin = (str(venv_ytdlp) if venv_ytdlp.exists() else None) or shutil.which("yt-dlp")
-    if ytdlp_bin and not Path(ytdlp_bin).exists():
-        ytdlp_bin = None
+    try:
+        import imageio_ffmpeg
+        imageio_ffmpeg_bin = imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception:
+        imageio_ffmpeg_bin = None
+
     venv_ffmpeg = Path(sys.executable).parent / "ffmpeg"
     ffmpeg_bin = (
         shutil.which("ffmpeg")
         or (str(venv_ffmpeg) if venv_ffmpeg.exists() else None)
         or ("/opt/homebrew/bin/ffmpeg" if Path("/opt/homebrew/bin/ffmpeg").exists() else None)
+        or ("/usr/local/bin/ffmpeg" if Path("/usr/local/bin/ffmpeg").exists() else None)
+        or imageio_ffmpeg_bin
     )
 
     if not ffmpeg_bin:
@@ -250,11 +254,19 @@ def _download_and_normalize_sync(video_id: str) -> Path:
 
     url = f"https://music.youtube.com/watch?v={video_id}"
 
-    if ytdlp_bin:
+    try:
+        import yt_dlp as _yt_dlp_mod  # noqa: F401
+        ytdlp_cmd_prefix = [sys.executable, "-m", "yt_dlp"]
+    except ImportError:
+        venv_ytdlp = Path(sys.executable).parent / "yt-dlp"
+        ytdlp_bin = (str(venv_ytdlp) if venv_ytdlp.exists() else None) or shutil.which("yt-dlp")
+        ytdlp_cmd_prefix = [ytdlp_bin] if (ytdlp_bin and Path(ytdlp_bin).exists()) else []
+
+    if ytdlp_cmd_prefix:
         try:
             logger.info(f"[Pre-fetcher] Downloading & EBU R128 normalizing {video_id} via yt-dlp | ffmpeg...")
             ytdlp_cmd = [
-                ytdlp_bin,
+                *ytdlp_cmd_prefix,
                 "-f", "bestaudio[abr<=160]/bestaudio/best",
                 "--concurrent-fragments", "4",
                 "--no-playlist",

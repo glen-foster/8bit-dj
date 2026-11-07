@@ -4,6 +4,7 @@ aiosqlite>=0.20.0
 python-dotenv>=1.0.1
 ytmusicapi>=1.7.4
 yt-dlp[default]>=2025.1.1
+imageio-ffmpeg>=0.5.1
 google-genai>=0.3.0
 pydantic>=2.7.4
 qrcode[pil]>=7.4.2
