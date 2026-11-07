@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import qrcode
+import subprocess
 from dotenv import load_dotenv
 from fastapi import FastAPI, Header, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
@@ -43,6 +44,116 @@ PORT = int(os.getenv("PORT", "8000"))
 
 _tunnel_url: Optional[str] = None
 _tunnel_proc: Optional[asyncio.subprocess.Process] = None
+
+
+def is_local_device_request(client_host: Optional[str], headers: Any) -> bool:
+    """
+    Returns True only when accessed directly on the local device (e.g. Raspberry Pi kiosk
+    at http://localhost:8000 or http://127.0.0.1:8000), and False when accessed remotely
+    over LAN IP (192.168.x.x) or the public SSH reverse tunnel (*.lhr.life).
+    """
+    if client_host not in ("127.0.0.1", "::1", "localhost"):
+        return False
+    if headers.get("x-forwarded-for") or headers.get("x-forwarded-host"):
+        return False
+    host_hdr = (headers.get("host") or "").split(":")[0].strip().lower()
+    return host_hdr in ("localhost", "127.0.0.1", "::1")
+
+
+def get_system_volume() -> int:
+    raw = database.get_setting("system_volume", "50")
+    try:
+        return max(0, min(100, int(raw)))
+    except ValueError:
+        return 50
+
+
+def apply_os_system_volume(vol_pct: int) -> None:
+    """
+    Applies `vol_pct` (0-100) to the OS audio mixer:
+    - On Raspberry Pi (PipeWire / WirePlumber): updates WirePlumber saved route volume AND
+      sets live `@DEFAULT_AUDIO_SINK@` volume via `wpctl` (plus `pactl` / `amixer` if present).
+    - On macOS: sets output volume via `osascript`.
+    """
+    vol_pct = max(0, min(100, int(vol_pct)))
+    vol_float = round(vol_pct / 100.0, 2)
+    cubic_vol = round((vol_pct / 100.0) ** 3, 6)
+    is_muted = vol_pct == 0
+
+    try:
+        if sys.platform.startswith("linux"):
+            # 1. Update WirePlumber persisted HDMI route volume so hotplugged HDMI TVs also use vol_pct
+            wp_dir = Path.home() / ".local" / "state" / "wireplumber"
+            default_routes = wp_dir / "default-routes"
+            if default_routes.exists():
+                try:
+                    content = default_routes.read_text(encoding="utf-8")
+                    content = re.sub(
+                        r'"channelVolumes":\[[^\]]+\]',
+                        f'"channelVolumes":[{cubic_vol}, {cubic_vol}]',
+                        content,
+                    )
+                    content = re.sub(
+                        r'"mute":(true|false)',
+                        f'"mute":{"true" if is_muted else "false"}',
+                        content,
+                    )
+                    default_routes.write_text(content, encoding="utf-8")
+                except Exception as exc:
+                    logger.debug(f"WirePlumber default-routes update warning: {exc}")
+
+            # 2. Apply live PipeWire volume via wpctl across user runtime session(s)
+            wpctl_bin = shutil.which("wpctl")
+            if wpctl_bin:
+                uid = os.getuid()
+                runtime_dirs = [f"/run/user/{uid}", "/run/user/1000"]
+                for rdir in dict.fromkeys(runtime_dirs):
+                    if Path(rdir).exists():
+                        env = dict(os.environ, XDG_RUNTIME_DIR=rdir)
+                        subprocess.run(
+                            [wpctl_bin, "set-mute", "@DEFAULT_AUDIO_SINK@", "1" if is_muted else "0"],
+                            env=env,
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL,
+                            timeout=3,
+                        )
+                        subprocess.run(
+                            [wpctl_bin, "set-volume", "@DEFAULT_AUDIO_SINK@", f"{vol_float:.2f}"],
+                            env=env,
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL,
+                            timeout=3,
+                        )
+
+            pactl_bin = shutil.which("pactl")
+            if pactl_bin:
+                uid = os.getuid()
+                env = dict(os.environ, XDG_RUNTIME_DIR=f"/run/user/{uid}")
+                subprocess.run(
+                    [pactl_bin, "set-sink-volume", "@DEFAULT_SINK@", f"{vol_pct}%"],
+                    env=env,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=3,
+                )
+        elif sys.platform == "darwin":
+            osascript_bin = shutil.which("osascript")
+            if osascript_bin:
+                subprocess.run(
+                    [osascript_bin, "-e", f"set volume output volume {vol_pct}"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=3,
+                )
+    except Exception as exc:
+        logger.warning(f"System volume apply warning: {exc}")
+
+
+def set_system_volume(vol_pct: int) -> int:
+    clamped = max(0, min(100, int(vol_pct)))
+    database.set_setting("system_volume", str(clamped))
+    apply_os_system_volume(clamped)
+    return clamped
 
 
 def get_lan_ip() -> str:
@@ -199,6 +310,7 @@ def build_full_state(client_id: Optional[str] = None, include_host: bool = False
         "server_time": time.time(),
         "public_url": get_public_mobile_url(),
         "wifi_status": wifi_manager.get_wifi_status(),
+        "system_volume": get_system_volume(),
         "now_playing": enriched_now,
         "next_up_track": next_up_track,
         "queue": queue,
@@ -241,6 +353,8 @@ async def broadcast_state() -> None:
 async def lifespan(app: FastAPI):
     global prefetch_engine, _tunnel_proc
     database.init_db()
+    # Initialize default system volume to 50% on startup so audio never starts too loud
+    await asyncio.to_thread(set_system_volume, 50)
     # Ensure a track is ready in Now Playing on boot
     now = database.get_now_playing()
     if not now:
@@ -287,11 +401,11 @@ class VoteRequest(BaseModel):
 
 
 class HostPinVerifyRequest(BaseModel):
-    pin: str
+    pin: Optional[str] = ""
 
 
 class HostActionRequest(BaseModel):
-    pin: str
+    pin: Optional[str] = ""
     action: str  # "veto_skip", "toggle_pause", "seek_ff", "seek_rw", "restart_track", "approve", "reject", "load_playlist"
     queue_id: Optional[int] = None
     playlist_id: Optional[str] = None
@@ -305,11 +419,15 @@ class WifiConnectRequest(BaseModel):
 
 
 class WifiHotspotActionRequest(BaseModel):
-    pin: str
+    pin: Optional[str] = ""
     enable: bool = True
 
 
-def verify_host_pin(pin: Optional[str]) -> None:
+def verify_host_pin(pin: Optional[str], request: Optional[Request] = None) -> None:
+    if request is not None:
+        client_host = request.client.host if request.client else None
+        if is_local_device_request(client_host, request.headers):
+            return
     if not pin or pin.strip() != HOST_PIN:
         raise HTTPException(status_code=403, detail="INVALID HOST PIN! ACCESS DENIED.")
 
@@ -380,12 +498,12 @@ async def api_wifi_networks(rescan: int = Query(default=0)) -> Dict[str, Any]:
 
 
 @app.post("/api/wifi/connect")
-async def api_wifi_connect(req: WifiConnectRequest) -> Dict[str, Any]:
+async def api_wifi_connect(req: WifiConnectRequest, request: Request) -> Dict[str, Any]:
     global _tunnel_url, _tunnel_proc
     st = await asyncio.to_thread(wifi_manager.get_wifi_status)
-    # Require Host PIN only when not in captive-portal hotspot mode
+    # Require Host PIN only when not in captive-portal hotspot mode and not on local device
     if not st.get("hotspot_active"):
-        verify_host_pin(req.pin)
+        verify_host_pin(req.pin, request)
 
     res = await asyncio.to_thread(wifi_manager.connect_to_wifi, req.ssid, req.password)
     if res.get("ok"):
@@ -401,8 +519,8 @@ async def api_wifi_connect(req: WifiConnectRequest) -> Dict[str, Any]:
 
 
 @app.post("/api/wifi/hotspot")
-async def api_wifi_hotspot(req: WifiHotspotActionRequest) -> Dict[str, Any]:
-    verify_host_pin(req.pin)
+async def api_wifi_hotspot(req: WifiHotspotActionRequest, request: Request) -> Dict[str, Any]:
+    verify_host_pin(req.pin, request)
     if req.enable:
         res = await asyncio.to_thread(wifi_manager.start_setup_hotspot)
     else:
@@ -448,7 +566,9 @@ async def api_get_state(
     client_id: Optional[str] = Query(default=None),
     x_host_pin: Optional[str] = Header(default=None),
 ) -> Dict[str, Any]:
-    include_host = bool(x_host_pin and x_host_pin.strip() == HOST_PIN)
+    client_host = request.client.host if request.client else None
+    is_local = is_local_device_request(client_host, request.headers)
+    include_host = is_local or bool(x_host_pin and x_host_pin.strip() == HOST_PIN)
     state = build_full_state(client_id=client_id, include_host=include_host)
     state["public_url"] = get_public_mobile_url(request)
     return state
@@ -531,6 +651,7 @@ async def serve_normalized_audio(video_id: str) -> FileResponse:
     Serves the EBU R128 loudness-normalized MP3 from `/tmp/audio_cache/`.
     If not yet cached, triggers immediate synchronous normalization so the deck never 404s.
     """
+    await asyncio.to_thread(apply_os_system_volume, get_system_volume())
     cached = audio_engine.get_cached_audio_path(video_id)
     if not cached and prefetch_engine:
         cached = await prefetch_engine.ensure_track_buffered(video_id, wait_if_inflight=True)
@@ -566,24 +687,25 @@ async def api_advance_track() -> Dict[str, Any]:
 
 # --- Host PIN & Admin Routes ---
 @app.post("/api/host/verify")
-async def api_host_verify(req: HostPinVerifyRequest) -> Dict[str, Any]:
-    verify_host_pin(req.pin)
+async def api_host_verify(req: HostPinVerifyRequest, request: Request) -> Dict[str, Any]:
+    verify_host_pin(req.pin, request)
     return {"ok": True, "state": build_full_state(include_host=True)}
 
 
 @app.get("/api/host/search_playlists")
 async def api_host_search_playlists(
+    request: Request,
     q: str = Query(..., min_length=1),
     pin: Optional[str] = Query(default=None),
 ) -> Dict[str, Any]:
-    verify_host_pin(pin)
+    verify_host_pin(pin, request)
     results = await asyncio.to_thread(audio_engine.search_playlists_ytmusic, q, 8)
     return {"ok": True, "results": results}
 
 
 @app.post("/api/host/action")
-async def api_host_action(req: HostActionRequest) -> Dict[str, Any]:
-    verify_host_pin(req.pin)
+async def api_host_action(req: HostActionRequest, request: Request) -> Dict[str, Any]:
+    verify_host_pin(req.pin, request)
 
     if req.action == "veto_skip":
         next_track = database.pop_next_track_to_play()
@@ -653,7 +775,8 @@ async def api_host_action(req: HostActionRequest) -> Dict[str, Any]:
         try:
             vol_pct = int(req.action.split(":", 1)[1].strip())
         except ValueError:
-            vol_pct = 150
+            vol_pct = 50
+        vol_pct = await asyncio.to_thread(set_system_volume, vol_pct)
         await ws_manager.broadcast_json(
             {
                 "type": "host_transport_control",
@@ -661,7 +784,7 @@ async def api_host_action(req: HostActionRequest) -> Dict[str, Any]:
                 "volume_pct": vol_pct,
             }
         )
-        return {"ok": True, "message": f"TV MASTER VOLUME BOOST SET TO: {vol_pct}%"}
+        return {"ok": True, "volume_pct": vol_pct, "message": f"SYSTEM VOLUME SET TO: {vol_pct}%"}
 
     elif req.action == "clear_scene_cache":
         cleared = database.clear_all_cached_scenes()
@@ -698,7 +821,9 @@ async def websocket_endpoint(
     client_id: str = Query(default="anon"),
     pin: Optional[str] = Query(default=None),
 ) -> None:
-    if role == "host" and (not pin or pin.strip() != HOST_PIN):
+    ws_client_host = websocket.client.host if websocket.client else None
+    is_local_ws = is_local_device_request(ws_client_host, websocket.headers)
+    if role == "host" and not is_local_ws and (not pin or pin.strip() != HOST_PIN):
         await websocket.close(code=1008, reason="Invalid Host PIN")
         return
 
@@ -748,7 +873,7 @@ async def websocket_endpoint(
 
             elif mtype == "host_command":
                 cmd_pin = str(msg.get("pin", "")).strip()
-                if cmd_pin != HOST_PIN:
+                if not is_local_ws and cmd_pin != HOST_PIN:
                     await websocket.send_json({"type": "error", "message": "INVALID HOST PIN!"})
                     continue
 

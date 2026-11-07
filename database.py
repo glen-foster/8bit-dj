@@ -408,7 +408,7 @@ def ensure_minimum_queue_size(min_count: int = 5) -> None:
 
 
 def get_active_queue(min_seed_fill: int = 5) -> List[Dict[str, Any]]:
-    """Returns queued tracks ordered by votes DESC, random tie_breaker DESC, topping up with seed tracks if below `min_seed_fill`."""
+    """Returns queued tracks ordered by votes DESC, ready status DESC, random tie_breaker DESC, topping up with seed tracks if below `min_seed_fill`."""
     if min_seed_fill > 0:
         ensure_minimum_queue_size(min_seed_fill)
     with get_conn() as conn:
@@ -416,7 +416,7 @@ def get_active_queue(min_seed_fill: int = 5) -> List[Dict[str, Any]]:
             """
             SELECT * FROM queue
             WHERE status = 'queued'
-            ORDER BY votes DESC, tie_breaker DESC, id ASC
+            ORDER BY votes DESC, CASE WHEN audio_status = 'ready' THEN 1 ELSE 0 END DESC, tie_breaker DESC, id ASC
             """
         ).fetchall()
         return [dict(r) for r in rows]
@@ -507,12 +507,12 @@ def pop_next_track_to_play() -> Optional[Dict[str, Any]]:
             "UPDATE queue SET status = 'played' WHERE status = 'playing'"
         )
 
-        # Find highest voted queued track (preferring ready audio if available, otherwise top voted)
+        # Find highest voted queued track (preferring ready audio if available among tied votes)
         next_row = conn.execute(
             """
             SELECT * FROM queue
             WHERE status = 'queued'
-            ORDER BY votes DESC, tie_breaker DESC, id ASC
+            ORDER BY votes DESC, CASE WHEN audio_status = 'ready' THEN 1 ELSE 0 END DESC, tie_breaker DESC, id ASC
             LIMIT 1
             """
         ).fetchone()
@@ -691,7 +691,22 @@ def save_cached_scene(video_id: str, title: str, artist: str, scene: Dict[str, A
         conn.commit()
 
 
-def get_recently_played_video_ids(keep_recent: int = 2) -> List[str]:
+def get_setting(key: str, default: str = "") -> str:
+    with get_conn() as conn:
+        row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
+        return str(row["value"]) if row else default
+
+
+def set_setting(key: str, value: str) -> None:
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
+            (key, str(value)),
+        )
+        conn.commit()
+
+
+def get_recently_played_video_ids(keep_recent: int = 10) -> List[str]:
     """Returns video_ids that are currently active or needed so old cached files can be cleaned up."""
     with get_conn() as conn:
         active_rows = conn.execute(

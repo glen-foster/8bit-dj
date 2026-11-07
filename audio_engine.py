@@ -262,7 +262,7 @@ def _download_and_normalize_sync(video_id: str) -> Path:
                 "--no-warnings",
             ]
             if shutil.which("node"):
-                ytdlp_cmd.extend(["--js-runtimes", "node", "--remote-components", "ejs:github"])
+                ytdlp_cmd.extend(["--js-runtimes", "node"])
             ytdlp_cmd.extend(["-o", "-", url])
             ffmpeg_cmd = [
                 ffmpeg_bin,
@@ -271,9 +271,9 @@ def _download_and_normalize_sync(video_id: str) -> Path:
                 "-y",
                 "-i", "pipe:0",
                 "-vn",
-                "-af", "silenceremove=start_periods=1:start_duration=0.1:start_threshold=-45dB,loudnorm=I=-9:TP=-0.3:LRA=9,volume=1.35",
+                "-af", "silenceremove=start_periods=1:start_duration=0.1:start_threshold=-45dB,loudnorm=I=-14:TP=-1.5:LRA=11:dual_mono=true",
                 "-acodec", "libmp3lame",
-                "-ab", "192k",
+                "-q:a", "4",
                 "-ar", "44100",
                 str(temp_path),
             ]
@@ -346,6 +346,7 @@ class AudioPrefetchEngine:
         self.on_state_change = on_state_change
         self._running = False
         self._inflight_downloads: set[str] = set()
+        self._download_sem = asyncio.Semaphore(1)
         self._task: Optional[asyncio.Task] = None
         self._wakeup_event = asyncio.Event()
 
@@ -383,8 +384,8 @@ class AudioPrefetchEngine:
         if video_id in self._inflight_downloads:
             if not wait_if_inflight:
                 return None
-            # Wait up to 60s for the in-flight background download to complete
-            for _ in range(120):
+            # Wait up to 120s for the in-flight background download to complete
+            for _ in range(240):
                 await asyncio.sleep(0.5)
                 ready_path = get_cached_audio_path(video_id)
                 if ready_path:
@@ -399,7 +400,12 @@ class AudioPrefetchEngine:
             await self.on_state_change()
 
         try:
-            path = await asyncio.to_thread(_download_and_normalize_sync, video_id)
+            async with self._download_sem:
+                existing_after_wait = get_cached_audio_path(video_id)
+                if existing_after_wait:
+                    path = existing_after_wait
+                else:
+                    path = await asyncio.to_thread(_download_and_normalize_sync, video_id)
             database.update_audio_status(video_id, "ready", path.name)
             if self.on_state_change:
                 await self.on_state_change()
@@ -413,7 +419,7 @@ class AudioPrefetchEngine:
 
     def cleanup_old_cache_files(self) -> None:
         """Removes cached MP3/WAV files that are no longer in the active queue, playing, or next seed."""
-        keep_ids = set(database.get_recently_played_video_ids(keep_recent=2))
+        keep_ids = set(database.get_recently_played_video_ids(keep_recent=10))
         keep_stems = {
             "".join(c for c in vid if c.isalnum() or c in ("-", "_"))
             for vid in keep_ids
@@ -462,27 +468,47 @@ class AudioPrefetchEngine:
                             self._generate_scene_bg(vid, track["title"], track["artist"])
                         )
 
-                # 2. Immediately Pre-fetch Audio (Now Playing + Top 3 in queue + Pending Approvals + Next Seed)
+                # 2. Prioritized Audio Pre-fetching (Now Playing FIRST, then Top 3 in queue, Pending, Next Seed)
+                #    We process one uncached track at a time in priority order so background downloads
+                #    never compete with Now Playing or #1 Up Next for CPU/network bandwidth on the Pi.
                 audio_targets: List[Dict[str, Any]] = []
                 if now_playing:
                     audio_targets.append(now_playing)
                 audio_targets.extend(queue[:3])
-                audio_targets.extend(pending[:3])
+                audio_targets.extend(pending[:2])
                 if next_seed:
                     audio_targets.append(next_seed)
 
+                # First, sync 'ready' status for any tracks already on disk
+                state_changed = False
+                uncached_targets: List[Dict[str, Any]] = []
+                seen_vids: set[str] = set()
                 for track in audio_targets:
                     vid = track["video_id"]
+                    if vid in seen_vids:
+                        continue
+                    seen_vids.add(vid)
                     cached = get_cached_audio_path(vid)
                     if cached:
                         if track.get("audio_status") != "ready":
                             database.update_audio_status(vid, "ready", cached.name)
-                            if self.on_state_change:
-                                await self.on_state_change()
+                            state_changed = True
                     else:
-                        asyncio.create_task(
-                            self.ensure_track_buffered(vid, track["title"], track["artist"])
-                        )
+                        uncached_targets.append(track)
+
+                if state_changed and self.on_state_change:
+                    await self.on_state_change()
+
+                # Buffer the highest-priority uncached track right now; then loop to re-check priority!
+                if uncached_targets:
+                    highest_priority = uncached_targets[0]
+                    await self.ensure_track_buffered(
+                        highest_priority["video_id"],
+                        highest_priority.get("title", ""),
+                        highest_priority.get("artist", ""),
+                    )
+                    # Immediately re-evaluate queue in case Now Playing or #1 changed while downloading
+                    continue
 
                 # 3. Clean up old audio files after playback
                 self.cleanup_old_cache_files()

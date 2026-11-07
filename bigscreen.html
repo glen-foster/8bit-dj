@@ -358,23 +358,24 @@
     let gainNodeA = null;
     let gainNodeB = null;
     let masterGainNode = null;
-    let compressorNode = null;
-    let masterVolumePct = Number(localStorage.getItem('jukebox_master_vol_pct') || 185);
+    let masterVolumePct = 50;
+    localStorage.removeItem('jukebox_master_vol_pct');
     let freqData = new Uint8Array(64);
     let timeData = new Uint8Array(64);
 
     let activeDeck = 'A'; // 'A' or 'B'
     let activeVideoId = null;
+    let activeTrackAudioReady = false;
     let preloadedNextVideoId = null;
     let isCrossfading = false;
     let crossfadeTimer = null;
     let advanceRequestedForId = null;
 
     function setMasterVolumePct(pct) {
-      masterVolumePct = Math.max(25, Math.min(300, Number(pct) || 185));
-      localStorage.setItem('jukebox_master_vol_pct', String(masterVolumePct));
+      masterVolumePct = Math.max(0, Math.min(100, Number(pct) ?? 50));
       if (masterGainNode) {
-        masterGainNode.gain.value = masterVolumePct / 100.0;
+        // OS PipeWire / system mixer handles 0-100% attenuation; keep Web Audio at clean 1.0 unity gain (0.0 when muted)
+        masterGainNode.gain.value = masterVolumePct === 0 ? 0.0 : 1.0;
       }
     }
 
@@ -394,16 +395,9 @@
       gainNodeA.gain.value = 1.0;
       gainNodeB.gain.value = 0.0;
 
-      // Master Gain Boost (default 185% for loud HDMI TV output) + Brickwall Limiter Compressor
+      // Clean unity gain (no digital overdrive or heavy compressor distortion; OS mixer controls system volume)
       masterGainNode = audioCtx.createGain();
-      masterGainNode.gain.value = masterVolumePct / 100.0;
-
-      compressorNode = audioCtx.createDynamicsCompressor();
-      compressorNode.threshold.value = -6;
-      compressorNode.knee.value = 6;
-      compressorNode.ratio.value = 8;
-      compressorNode.attack.value = 0.003;
-      compressorNode.release.value = 0.15;
+      masterGainNode.gain.value = masterVolumePct === 0 ? 0.0 : 1.0;
 
       const sourceA = audioCtx.createMediaElementSource(deckAEl);
       const sourceB = audioCtx.createMediaElementSource(deckBEl);
@@ -414,8 +408,7 @@
       gainNodeA.connect(analyser);
       gainNodeB.connect(analyser);
       analyser.connect(masterGainNode);
-      masterGainNode.connect(compressorNode);
-      compressorNode.connect(audioCtx.destination);
+      masterGainNode.connect(audioCtx.destination);
     }
 
     async function ensureAudioUnlocked() {
@@ -448,16 +441,17 @@
         : { currentEl: deckBEl, nextEl: deckAEl, currentGain: gainNodeB, nextGain: gainNodeA, nextDeckName: 'A' };
     }
 
-    function loadAndPlayOnActiveDeck(track) {
+    function loadAndPlayOnActiveDeck(track, forceReload = false) {
       if (!track || !track.video_id) return;
       ensureAudioUnlocked();
 
       activeVideoId = track.video_id;
+      activeTrackAudioReady = !!track.audio_ready;
       const { currentEl, currentGain, nextGain } = getDeckElements();
       const targetUrl = `/api/audio/${track.video_id}`;
 
-      if (!currentEl.src.endsWith(targetUrl)) {
-        currentEl.src = targetUrl;
+      if (forceReload || !currentEl.src.includes(targetUrl)) {
+        currentEl.src = forceReload ? `${targetUrl}?t=${Date.now()}` : targetUrl;
         currentEl.load();
       }
       if (currentGain && nextGain) {
@@ -532,8 +526,9 @@
 
       if (targetTrack && targetTrack.video_id) {
         activeVideoId = targetTrack.video_id;
+        activeTrackAudioReady = !!targetTrack.audio_ready;
         const nextUrl = `/api/audio/${targetTrack.video_id}`;
-        if (!nextEl.src.endsWith(nextUrl)) {
+        if (!nextEl.src.includes(nextUrl)) {
           nextEl.src = nextUrl;
           nextEl.load();
         }
@@ -548,19 +543,39 @@
       // so the outgoing track keeps playing with zero dead air while normalizing!
       if (nextEl.readyState < 3) {
         document.getElementById('crossfadeBadge').textContent = "BUFFERING NEXT...";
-        await new Promise((resolve) => {
-          let resolved = false;
-          const done = () => {
-            if (resolved) return;
-            resolved = true;
-            nextEl.removeEventListener('canplay', done);
-            nextEl.removeEventListener('error', done);
-            resolve();
-          };
-          nextEl.addEventListener('canplay', done, { once: true });
-          nextEl.addEventListener('error', done, { once: true });
-          setTimeout(done, 45000);
-        });
+        let retries = 0;
+        while (nextEl.readyState < 3 && retries < 3) {
+          const ok = await new Promise((resolve) => {
+            let resolved = false;
+            const onReady = () => {
+              if (resolved) return;
+              resolved = true;
+              cleanup();
+              resolve(true);
+            };
+            const onErr = () => {
+              if (resolved) return;
+              resolved = true;
+              cleanup();
+              resolve(false);
+            };
+            const cleanup = () => {
+              nextEl.removeEventListener('canplay', onReady);
+              nextEl.removeEventListener('error', onErr);
+            };
+            nextEl.addEventListener('canplay', onReady, { once: true });
+            nextEl.addEventListener('error', onErr, { once: true });
+            setTimeout(onErr, 40000);
+          });
+          if (ok) break;
+          retries++;
+          if (targetTrack && targetTrack.video_id && retries < 3) {
+            await new Promise(r => setTimeout(r, 2000));
+            nextEl.src = `/api/audio/${targetTrack.video_id}?t=${Date.now()}`;
+            nextEl.load();
+          }
+        }
+        activeTrackAudioReady = true;
       }
 
       document.getElementById('crossfadeBadge').textContent = "6S X-FADE ACTIVE";
@@ -1499,6 +1514,10 @@
         }
       }
 
+      if (typeof state.system_volume === 'number') {
+        setMasterVolumePct(state.system_volume);
+      }
+
       // Now Playing
       const np = state.now_playing;
       if (np) {
@@ -1515,8 +1534,16 @@
           updateStageHeader();
         }
 
+        const { currentEl } = getDeckElements();
         if (activeVideoId !== np.video_id && !isCrossfading) {
           loadAndPlayOnActiveDeck(np);
+        } else if (
+          !isCrossfading &&
+          np.audio_ready &&
+          (!activeTrackAudioReady || currentEl.error || (currentEl.paused && currentEl.readyState < 2))
+        ) {
+          // Track finished normalizing in the background while deck was waiting -> reload & start playback immediately!
+          loadAndPlayOnActiveDeck(np, true);
         }
       }
 
@@ -1587,7 +1614,7 @@
         setVizModeById(msg.viz_mode);
         return;
       }
-      if (msg.control === 'set_volume' && msg.volume_pct) {
+      if (msg.control === 'set_volume' && typeof msg.volume_pct === 'number') {
         setMasterVolumePct(msg.volume_pct);
         return;
       }
@@ -1637,7 +1664,7 @@
     window.addEventListener('message', (e) => {
       if (e.data && e.data.type === 'set_viz_mode' && e.data.viz_mode) {
         setVizModeById(e.data.viz_mode);
-      } else if (e.data && e.data.type === 'set_volume' && e.data.volume_pct) {
+      } else if (e.data && e.data.type === 'set_volume' && typeof e.data.volume_pct === 'number') {
         setMasterVolumePct(e.data.volume_pct);
       }
     });
