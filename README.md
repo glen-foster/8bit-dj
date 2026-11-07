@@ -4,6 +4,8 @@ Turn a **Raspberry Pi 5** (or any Mac / Linux machine) plugged into a TV or proj
 
 Guests scan a QR code on the TV to join from their phones (over 5G/LTE or Wi-Fi—no app install required), get a random retro DJ tag, vote on the live queue, or request tracks from YouTube Music while the TV renders 60fps audio-reactive 8-bit stages and custom AI-generated pixel-art sprites.
 
+![8-Bit Arcade Jukebox Big Screen HUD](./screenshots/bigscreen-side-scroller.png)
+
 ---
 
 ## Features
