@@ -8,6 +8,10 @@ Guests scan a QR code on the TV to join from their phones (over 5G/LTE or Wi-Fi�
 
 ## Screenshots
 
+| Big Screen — Midnight City Skyline Stage | Big Screen — Side-Scroller Platformer Stage |
+| :---: | :---: |
+| ![Big Screen City Skyline](./screenshots/bigscreen-city-cruiser.png) | ![Big Screen Side-Scroller](./screenshots/bigscreen-side-scroller.png) |
+
 | Host Admin Command Console (`/host`) | Mobile DJ Controller (`/mobile`) |
 | :---: | :---: |
 | ![Host Admin Command Console](./screenshots/host-admin-console.png) | <img src="./screenshots/mobile-dj-controller.png" alt="Mobile DJ Controller" width="320" /> |
