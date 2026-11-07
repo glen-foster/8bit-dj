@@ -1,0 +1,63 @@
+* {
+  box-sizing: border-box;
+  font-family: 'Press Start 2P', monospace;
+}
+
+body {
+  background-color: #090518;
+  color: #ffffff;
+}
+
+.host-panel {
+  background: #130b2e;
+  border: 3px solid #00f5d4;
+  box-shadow: 4px 4px 0px #000000;
+}
+
+.host-panel-pink {
+  background: #1a0826;
+  border: 3px solid #ff2a85;
+  box-shadow: 4px 4px 0px #000000;
+}
+
+.arcade-btn {
+  border: 2px solid #ffffff;
+  box-shadow: 2px 2px 0px #000000;
+}
+
+.arcade-btn:active {
+  transform: translate(1px, 1px);
+  box-shadow: 1px 1px 0px #000000;
+}
+
+/* Retro 8-Bit Range Slider */
+input[type="range"].retro-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 10px;
+  background: #05020d;
+  border: 2px solid #00f5d4;
+  outline: none;
+  cursor: pointer;
+}
+
+input[type="range"].retro-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 18px;
+  background: #ff2a85;
+  border: 2px solid #ffffff;
+  box-shadow: 2px 2px 0px #000000;
+  cursor: pointer;
+}
+
+input[type="range"].retro-slider::-moz-range-thumb {
+  width: 16px;
+  height: 18px;
+  background: #ff2a85;
+  border: 2px solid #ffffff;
+  box-shadow: 2px 2px 0px #000000;
+  border-radius: 0;
+  cursor: pointer;
+}

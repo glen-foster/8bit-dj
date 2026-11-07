@@ -1,0 +1,50 @@
+* {
+  box-sizing: border-box;
+  font-family: 'Press Start 2P', monospace;
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  background-color: #090518;
+  color: #ffffff;
+  background-image:
+    radial-gradient(rgba(0, 245, 212, 0.08) 1px, transparent 1px),
+    radial-gradient(rgba(255, 42, 133, 0.05) 1px, #090518 1px);
+  background-size: 24px 24px;
+  background-position: 0 0, 12px 12px;
+}
+
+.retro-card {
+  background: #120b29;
+  border: 3px solid #00f5d4;
+  box-shadow: 4px 4px 0px #000000;
+}
+
+.retro-card-pink {
+  background: #160926;
+  border: 3px solid #ff2a85;
+  box-shadow: 4px 4px 0px #000000;
+}
+
+.retro-btn {
+  border: 3px solid #ffffff;
+  box-shadow: 3px 3px 0px #000000;
+  transition: transform 0.08s ease;
+}
+
+.retro-btn:active {
+  transform: translate(2px, 2px);
+  box-shadow: 1px 1px 0px #000000;
+}
+
+.tab-active {
+  background-color: #00f5d4;
+  color: #090518;
+  border-color: #ffffff;
+}
+
+.tab-inactive {
+  background-color: #1b113a;
+  color: #9ca3af;
+  border-color: #374151;
+}

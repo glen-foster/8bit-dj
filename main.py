@@ -23,6 +23,7 @@ import subprocess
 from dotenv import load_dotenv
 from fastapi import FastAPI, Header, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 import ai_scene_generator
@@ -428,6 +429,10 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="8-Bit Jukebox MVP", lifespan=lifespan)
 
+STATIC_DIR = BASE_DIR / "static"
+STATIC_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
 
 # --- Request Models ---
 class RegisterUserRequest(BaseModel):
@@ -514,7 +519,7 @@ async def captive_portal_intercept_middleware(request: Request, call_next):
         or host_hdr.endswith(".local")
         or host_hdr.endswith(".lhr.life")
     )
-    if not is_local_or_tunnel and not path.startswith("/api/"):
+    if not is_local_or_tunnel and not path.startswith("/api/") and not path.startswith("/static/"):
         return RedirectResponse(url=f"http://{wifi_manager.HOTSPOT_IP}:{PORT}/wifi-setup", status_code=302)
 
     return await call_next(request)
@@ -745,11 +750,17 @@ async def api_host_verify(req: HostPinVerifyRequest, request: Request) -> Dict[s
 @app.get("/api/host/search_playlists")
 async def api_host_search_playlists(
     request: Request,
-    q: str = Query(..., min_length=1),
+    q: str = Query(default=""),
+    provider: str = Query(default="ytmusic"),
     pin: Optional[str] = Query(default=None),
 ) -> Dict[str, Any]:
     verify_host_pin(pin, request)
-    results = await asyncio.to_thread(audio_engine.search_playlists_ytmusic, q, 8)
+    if provider.lower() == "spotify" or "open.spotify.com" in q or q.strip().startswith("spotify:"):
+        results = await asyncio.to_thread(audio_engine.search_playlists_spotify, q, 8)
+    else:
+        if not q.strip():
+            return {"ok": True, "results": []}
+        results = await asyncio.to_thread(audio_engine.search_playlists_ytmusic, q, 8)
     return {"ok": True, "results": results}
 
 

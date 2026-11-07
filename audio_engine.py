@@ -11,14 +11,19 @@ Core Audio Engine for the 8-Bit Jukebox MVP.
 """
 
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 import hashlib
+import json
 import logging
 import math
 import os
+import re
 import shutil
 import struct
 import subprocess
 import sys
+import threading
+import urllib.request
 import wave
 from pathlib import Path
 from typing import Any, Callable, Coroutine, Dict, List, Optional
@@ -58,13 +63,93 @@ def _parse_duration_seconds(duration_str: Optional[str], duration_seconds: Optio
     return 210
 
 
+# Curated public Spotify Playlists that work 100% unauthenticated via Spotify's embed endpoint
+CURATED_SPOTIFY_PLAYLISTS: List[Dict[str, str]] = [
+    {"playlist_id": "spotify:37i9dQZF1DX4UtSsGT1Sbe", "title": "All Out 80s", "author": "Spotify", "item_count": "100", "keywords": "80s eighties retro synth pop rock party classic"},
+    {"playlist_id": "spotify:37i9dQZF1DXbTxeAdrVG2l", "title": "All Out 90s", "author": "Spotify", "item_count": "100", "keywords": "90s nineties grunge pop dance party throwback"},
+    {"playlist_id": "spotify:37i9dQZF1DX4o1oenSJRJd", "title": "All Out 2000s", "author": "Spotify", "item_count": "100", "keywords": "2000s 00s y2k pop rock hip hop party throwback"},
+    {"playlist_id": "spotify:37i9dQZF1DWTJ7xPn4vNaz", "title": "All Out 70s", "author": "Spotify", "item_count": "100", "keywords": "70s seventies disco funk classic rock soul"},
+    {"playlist_id": "spotify:37i9dQZF1DWXRqgorJj26U", "title": "Rock Classics", "author": "Spotify", "item_count": "100", "keywords": "rock classics guitar anthems 70s 80s 90s"},
+    {"playlist_id": "spotify:37i9dQZF1DXcBWIGoYBM5M", "title": "Today's Top Hits", "author": "Spotify", "item_count": "50", "keywords": "top hits pop charts current party 2025 2026"},
+    {"playlist_id": "spotify:37i9dQZF1DX26DKvjp0s9M", "title": "Indie Party", "author": "Spotify", "item_count": "75", "keywords": "indie rock alternative party dance"},
+    {"playlist_id": "spotify:37i9dQZF1DX186v583rmzp", "title": "I Love My '90s Hip-Hop", "author": "Spotify", "item_count": "100", "keywords": "90s hip hop rap classic old school party"},
+    {"playlist_id": "spotify:37i9dQZF1DX0XUsuxWHRQd", "title": "RapCaviar", "author": "Spotify", "item_count": "50", "keywords": "hip hop rap trap hits party"},
+    {"playlist_id": "spotify:37i9dQZF1DX1MUPbVKMgJE", "title": "Disco Forever", "author": "Spotify", "item_count": "100", "keywords": "disco funk boogie 70s dance party"},
+    {"playlist_id": "spotify:37i9dQZF1DXaXB8fQg7xif", "title": "Dance Party", "author": "Spotify", "item_count": "100", "keywords": "dance edm house club electronic party"},
+    {"playlist_id": "spotify:37i9dQZF1DX3oM43CtKnRV", "title": "00s Rock Anthems", "author": "Spotify", "item_count": "100", "keywords": "00s 2000s rock indie alternative punk"},
+    {"playlist_id": "spotify:37i9dQZF1DXdLEN7aqioXM", "title": "Nightrider (Synthwave / OutRun)", "author": "Spotify", "item_count": "100", "keywords": "synthwave outrun retro 8bit arcade cyber electronic"},
+    {"playlist_id": "spotify:37i9dQZF1DX9wC1KY45plY", "title": "Classic Road Trip Songs", "author": "Spotify", "item_count": "100", "keywords": "road trip singalong classics rock pop party"},
+    {"playlist_id": "spotify:37i9dQZF1DWY4lFlS4Pnso", "title": "Hot Hits UK", "author": "Spotify", "item_count": "50", "keywords": "uk hits pop dance charts party"},
+]
+
+
+def _extract_spotify_id(raw: str, expected_type: str = "playlist") -> Optional[str]:
+    """Extracts a 22-character Spotify ID from a URL, URI, or `spotify:` prefixed string."""
+    s = raw.strip()
+    if s.startswith("spotify:") and not s.startswith(f"spotify:{expected_type}:"):
+        candidate = s.split(":", 1)[1].strip()
+        if re.match(r"^[A-Za-z0-9]{22}$", candidate):
+            return candidate
+    m = re.search(rf"(?:open\.spotify\.com/{expected_type}/|spotify:{expected_type}:)([A-Za-z0-9]{{22}})", s)
+    if m:
+        return m.group(1)
+    if re.match(r"^[A-Za-z0-9]{22}$", s):
+        return s
+    return None
+
+
+def _fetch_spotify_embed_entity(entity_type: str, spotify_id: str) -> Optional[Dict[str, Any]]:
+    """
+    Fetches track or playlist metadata directly from Spotify's public embed page
+    (`https://open.spotify.com/embed/{entity_type}/{spotify_id}`) without requiring
+    any Spotify account, login, or API key.
+    """
+    url = f"https://open.spotify.com/embed/{entity_type}/{spotify_id}"
+    try:
+        req = urllib.request.Request(
+            url,
+            headers={
+                "User-Agent": (
+                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+                )
+            },
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            html = resp.read().decode("utf-8", errors="ignore")
+        m = re.search(r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>', html)
+        if not m:
+            return None
+        data = json.loads(m.group(1))
+        return data.get("props", {}).get("pageProps", {}).get("state", {}).get("data", {}).get("entity")
+    except Exception as exc:
+        logger.warning(f"Spotify embed fetch failed for {entity_type}/{spotify_id}: {exc}")
+        return None
+
+
 def search_ytmusic(query: str, limit: int = 12) -> List[Dict[str, Any]]:
-    """Searches YouTube Music for songs matching `query` via `ytmusicapi`."""
+    """
+    Searches YouTube Music for songs matching `query` via `ytmusicapi`.
+    Also supports pasting a public Spotify Track URL/URI (`open.spotify.com/track/...`)
+    without requiring a Spotify account.
+    """
     if not query or not query.strip():
         return []
+    q_clean = query.strip()
+
+    # If the user pasted a Spotify Track URL or URI, resolve its title & artist via Spotify's public embed
+    if "open.spotify.com/track/" in q_clean or q_clean.startswith("spotify:track:"):
+        sp_track_id = _extract_spotify_id(q_clean, "track")
+        if sp_track_id:
+            entity = _fetch_spotify_embed_entity("track", sp_track_id)
+            if entity:
+                title = entity.get("title") or ""
+                artists = ", ".join(a.get("name", "") for a in (entity.get("artists") or []) if a.get("name"))
+                q_clean = f"{title} {artists}".strip() or q_clean
+
     if _ytmusic is not None:
         try:
-            results = _ytmusic.search(query.strip(), filter="songs", limit=limit)
+            results = _ytmusic.search(q_clean, filter="songs", limit=limit)
             parsed: List[Dict[str, Any]] = []
             for item in results:
                 vid = item.get("videoId")
@@ -87,10 +172,10 @@ def search_ytmusic(query: str, limit: int = 12) -> List[Dict[str, Any]]:
             if parsed:
                 return parsed
         except Exception as exc:
-            logger.warning(f"ytmusicapi search error for '{query}': {exc}")
+            logger.warning(f"ytmusicapi search error for '{q_clean}': {exc}")
 
     # Fallback search against local seed pool if offline
-    q_low = query.lower()
+    q_low = q_clean.lower()
     pool = database.get_seed_pool()
     matches = [
         t for t in pool if q_low in t["title"].lower() or q_low in t["artist"].lower()
@@ -130,6 +215,7 @@ def search_playlists_ytmusic(query: str, limit: int = 8) -> List[Dict[str, Any]]
                         "author": author_str or "YouTube Music",
                         "item_count": str(item.get("itemCount") or ""),
                         "thumbnail": thumb_url,
+                        "provider": "ytmusic",
                     }
                 )
                 if len(results) >= limit:
@@ -139,9 +225,166 @@ def search_playlists_ytmusic(query: str, limit: int = 8) -> List[Dict[str, Any]]
     return results
 
 
+def search_playlists_spotify(query: str, limit: int = 8) -> List[Dict[str, Any]]:
+    """
+    Unauthenticated Spotify playlist search:
+    1. If `query` is a Spotify Playlist URL/URI or 22-char ID, fetches its live metadata
+       directly from `open.spotify.com/embed/playlist/{id}` (no Spotify account needed).
+    2. Matches against curated official Spotify playlists (80s, 90s, Rock, Indie, Hip-Hop, Disco, etc.).
+    """
+    if not query or not query.strip():
+        return [
+            {
+                "playlist_id": p["playlist_id"],
+                "title": p["title"],
+                "author": "Spotify Official",
+                "item_count": p["item_count"],
+                "thumbnail": "",
+                "provider": "spotify",
+            }
+            for p in CURATED_SPOTIFY_PLAYLISTS[:limit]
+        ]
+
+    q_clean = query.strip()
+    sp_id = _extract_spotify_id(q_clean, "playlist")
+    if sp_id and ("spotify" in q_clean.lower() or len(q_clean) == 22):
+        entity = _fetch_spotify_embed_entity("playlist", sp_id)
+        if entity:
+            track_list = entity.get("trackList") or []
+            cover_sources = (entity.get("coverArt") or {}).get("sources") or []
+            thumb = cover_sources[-1].get("url", "") if cover_sources else ""
+            return [
+                {
+                    "playlist_id": f"spotify:{sp_id}",
+                    "title": entity.get("name") or entity.get("title") or "Spotify Playlist",
+                    "author": entity.get("subtitle") or "Spotify",
+                    "item_count": str(len(track_list)),
+                    "thumbnail": thumb,
+                    "provider": "spotify",
+                }
+            ]
+
+    tokens = [t for t in re.split(r"\s+", q_clean.lower()) if t]
+    scored: List[tuple[int, Dict[str, str]]] = []
+    for item in CURATED_SPOTIFY_PLAYLISTS:
+        haystack = f"{item['title']} {item['keywords']}".lower()
+        score = sum(3 if tok in item["title"].lower() else (1 if tok in haystack else 0) for tok in tokens)
+        if score > 0 or q_clean.lower() in ("all", "spotify", "popular", "hits"):
+            scored.append((score, item))
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+    results: List[Dict[str, Any]] = [
+        {
+            "playlist_id": p["playlist_id"],
+            "title": p["title"],
+            "author": "Spotify Official (No Account Needed)",
+            "item_count": p["item_count"],
+            "thumbnail": "",
+            "provider": "spotify",
+        }
+        for _, p in scored[:limit]
+    ]
+
+    # If the user searched a niche theme not in the curated list, return all curated + YTMusic matches
+    if not results:
+        for p in CURATED_SPOTIFY_PLAYLISTS[:4]:
+            results.append(
+                {
+                    "playlist_id": p["playlist_id"],
+                    "title": p["title"],
+                    "author": "Spotify Official (No Account Needed)",
+                    "item_count": p["item_count"],
+                    "thumbnail": "",
+                    "provider": "spotify",
+                }
+            )
+    return results[:limit]
+
+
+def load_playlist_from_spotify(playlist_id_or_url: str, limit: int = 30) -> List[Dict[str, Any]]:
+    """
+    Loads tracks from any public Spotify playlist URL, URI, or ID without a Spotify account
+    by scraping Spotify's public embed JSON (`open.spotify.com/embed/playlist/{id}`) and
+    resolving each track in parallel to a playable YouTube Music `video_id`.
+    """
+    sp_id = _extract_spotify_id(playlist_id_or_url, "playlist")
+    if not sp_id:
+        raise ValueError(f"Invalid Spotify playlist URL or ID: {playlist_id_or_url}")
+
+    entity = _fetch_spotify_embed_entity("playlist", sp_id)
+    if not entity:
+        raise RuntimeError(f"Could not fetch public Spotify playlist '{sp_id}'. Make sure the playlist is public.")
+
+    raw_tracks = (entity.get("trackList") or [])[:limit]
+    if not raw_tracks:
+        raise RuntimeError("Spotify playlist returned 0 tracks.")
+
+    if _ytmusic is None:
+        raise RuntimeError("ytmusicapi is required to resolve Spotify tracks to playable audio streams.")
+
+    tls = threading.local()
+
+    def _get_thread_ytm() -> Any:
+        if not hasattr(tls, "ytm"):
+            from ytmusicapi import YTMusic
+            tls.ytm = YTMusic()
+        return tls.ytm
+
+    def _resolve_single_spotify_track(sp_item: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        title = (sp_item.get("title") or "").strip()
+        artist = (sp_item.get("subtitle") or "").replace("\u00a0", " ").strip()
+        dur_ms = sp_item.get("duration") or 210000
+        dur_sec = max(30, int(dur_ms / 1000)) if isinstance(dur_ms, (int, float)) else 210
+        if not title:
+            return None
+        try:
+            ytm_client = _get_thread_ytm()
+            hits = ytm_client.search(f"{title} {artist}".strip(), filter="songs", limit=1)
+            if hits and hits[0].get("videoId"):
+                hit = hits[0]
+                vid = hit["videoId"]
+                thumbs = hit.get("thumbnails") or []
+                thumb_url = thumbs[-1].get("url", "") if thumbs else f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg"
+                return {
+                    "video_id": vid,
+                    "title": title,
+                    "artist": artist or "Unknown Artist",
+                    "duration": _parse_duration_seconds(hit.get("duration"), hit.get("duration_seconds")) or dur_sec,
+                    "thumbnail": thumb_url,
+                }
+        except Exception as exc:
+            logger.debug(f"Spotify->YTMusic resolve warning for '{title} - {artist}': {exc}")
+        return None
+
+    logger.info(f"[Spotify Loader] Resolving {len(raw_tracks)} tracks from Spotify playlist {sp_id}...")
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        resolved = list(pool.map(_resolve_single_spotify_track, raw_tracks))
+
+    tracks: List[Dict[str, Any]] = []
+    seen_vids = set()
+    for t in resolved:
+        if t and t["video_id"] not in seen_vids:
+            seen_vids.add(t["video_id"])
+            tracks.append(t)
+    logger.info(f"[Spotify Loader] Successfully resolved {len(tracks)}/{len(raw_tracks)} Spotify tracks.")
+    return tracks
+
+
 def load_playlist_from_ytmusic(playlist_id: str, limit: int = 50) -> List[Dict[str, Any]]:
-    """Loads tracks from a YouTube Music playlist ID to populate the Host Seed Playlist."""
+    """
+    Loads tracks from a YouTube Music playlist ID/URL OR a public Spotify playlist ID/URL
+    to populate the Host Seed Playlist.
+    """
     clean_id = playlist_id.strip()
+
+    # Automatically route Spotify playlist URLs, URIs, `spotify:` prefixes, or 22-char Spotify IDs
+    if (
+        "open.spotify.com/playlist/" in clean_id
+        or clean_id.startswith("spotify:")
+        or (re.match(r"^[A-Za-z0-9]{22}$", clean_id) and not clean_id.startswith(("PL", "RD", "OL", "VL")))
+    ):
+        return load_playlist_from_spotify(clean_id, limit=min(limit, 30))
+
     if "list=" in clean_id:
         clean_id = clean_id.split("list=")[-1].split("&")[0]
     if clean_id.startswith("VL") and len(clean_id) > 4:

@@ -21,9 +21,12 @@ Guests scan a QR code on the TV to join from their phones (over 5G/LTE or Wi-Fiâ
 ## Features
 
 - **60fps Audio-Reactive 8-Bit TV HUD (`/bigscreen`)**:
-  - **6 Built-In Retro Visualizer Stages**:
+  - **9 Built-In Retro Visualizer Stages**:
     - **90s Arcade Beat-'Em-Up (`BRAWL`)**: 2.5D belt-scroller street brawler stage (*Streets of Rage* / *Final Fight* style) with sparring pixel fighters, hit sparks, 1P vs BOSS health bars, and audio-reactive trash-barrel flames.
     - **Side-Scroller Platformer (`SCROLL`)**: Parallax clouds, hills, bouncing retro question blocks, and running/jumping pixel characters.
+    - **Arcade Space Shooter (`SHMUP`)**: *Galaga* / *Gradius* warp starfield, ringed pixel planet, biomechanical tech trench, power-up capsule meter, and a hero ship with *Option* drones firing twin lasers into enemy formations.
+    - **16-Bit JRPG Boss Battle (`JRPG`)**: *Final Fantasy* / *EarthBound* psychedelic battle wave backdrop, bevelled blue command menu (`FIGHT / MAGIC / ITEM`) with party HP/MP bars, a `3x`-scaled giant Boss sprite, and `999` damage popups.
+    - **Gothic Castle Keep (`CASTLE`)**: *Castlevania* / *Bowser's Castle* stone archways, blood moon, flickering audio-reactive wall torches, stone battlements, and a bubbling lava moat.
     - **Classic Winamp LED Analyzer (`LED`)**: Segmented green/amber/red LED spectrum analyzer with gravity peak-hold caps and live oscilloscope ribbon.
     - **Winamp Demoscene Fire (`FIRE`)**: Audio-reactive rising embers, dual sine plasma waves, and mirrored spectrum bars.
     - **Midnight City Cruiser (`CITY`)**: Parallax skyscrapers with audio-reactive lit windows and scrolling night highway.
@@ -36,13 +39,14 @@ Guests scan a QR code on the TV to join from their phones (over 5G/LTE or Wi-Fiâ
 - **Dual-Deck Web Audio Engine & Prioritized EBU R128 Pre-fetcher**:
   - **6-Second Equal-Power Crossfader**: Seamlessly crossfades between `Deck A` and `Deck B` (via Web Audio API cosine/sine curves) 6 seconds before each track ends or when the Host triggers a skip.
   - **Prioritized Background Pre-fetcher**: Downloads audio via `yt-dlp` and pipes it through `ffmpeg` with silence trimming and EBU R128 loudness normalization (`loudnorm=I=-14:TP=-1.5:LRA=11`) into `/tmp/audio_cache/`, always prioritizing `Now Playing` and `#1 Up Next` first.
-  - **Auto-DJ Seed Pool**: Automatically keeps at least 5 tracks in the queue from your chosen YouTube Music seed playlist so the party never hits dead air.
+  - **Auto-DJ Seed Pool (YouTube Music & Spotify)**: Automatically keeps at least 5 tracks in the queue from your chosen **YouTube Music** or **Spotify** seed playlist so the party never hits dead air.
+  - **Zero-Account Spotify Support**: Load any public **Spotify Playlist** (`open.spotify.com/playlist/...`) or **Spotify Track** (`open.spotify.com/track/...`)â€”or pick from 15+ built-in official Spotify playlists (*All Out 80s*, *All Out 90s*, *Rock Classics*, *Disco Forever*, etc.)â€”with **no Spotify account or API key required**.
 
 - **Pocket Arcade Mobile DJ Controller (`/mobile`)**:
   - **Automatic Public HTTPS Tunnel**: Spawns a free outbound SSH reverse tunnel (`localhost.run`) on startup and updates the TV QR code automaticallyâ€”guests can scan and join over mobile data (5G/LTE) even if they aren't on the venue's Wi-Fi.
   - **Two Request Modes**:
     - **Fast Track**: Instant queueing from the Host's pre-approved Seed Playlist pool.
-    - **Open Search**: Full YouTube Music search (`ytmusicapi`) routed to the Host Approval queue.
+    - **Open Search**: Full YouTube Music search (`ytmusicapi`) or Spotify track link paste routed to the Host Approval queue.
   - **Live Voting & DJ Leaderboard**: 1 vote per guest per track, automatic queue re-ordering, and a live Top DJs leaderboard.
 
 - **Host Admin Command Console (`/host` & TV Popup)**:
