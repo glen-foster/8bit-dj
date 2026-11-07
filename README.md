@@ -4,17 +4,17 @@ Turn a **Raspberry Pi 5** (or any Mac / Linux machine) plugged into a TV or proj
 
 Guests scan a QR code on the TV to join from their phones (over 5G/LTE or Wi-Fi—no app install required), get a random retro DJ tag, vote on the live queue, or request tracks from YouTube Music while the TV renders 60fps audio-reactive 8-bit stages and custom AI-generated pixel-art sprites.
 
-![8-Bit Arcade Jukebox — Custom Gemini Pixel Art for "Peaches"](./screenshots/bigscreen-peaches.png)
+[![8-Bit Arcade Jukebox Live Demo](./screenshots/demo.gif)](./screenshots/demo.mp4)
 
 ## Screenshots
 
-| Big Screen — Midnight City Skyline Stage | Big Screen — Side-Scroller Platformer Stage |
+| Big Screen — Custom Gemini AI Pixel Art ("Peaches") | Big Screen — Midnight City Skyline Stage |
 | :---: | :---: |
-| ![Big Screen City Skyline](./screenshots/bigscreen-city-cruiser.png) | ![Big Screen Side-Scroller](./screenshots/bigscreen-side-scroller.png) |
+| ![Big Screen Custom Gemini Pixel Art](./screenshots/bigscreen-peaches.png) | ![Big Screen City Skyline](./screenshots/bigscreen-city-cruiser.png) |
 
-| Host Admin Command Console (`/host`) | Mobile DJ Controller (`/mobile`) |
-| :---: | :---: |
-| ![Host Admin Command Console](./screenshots/host-admin-console.png) | <img src="./screenshots/mobile-dj-controller.png" alt="Mobile DJ Controller" width="320" /> |
+| Big Screen — Side-Scroller Platformer Stage | Host Admin Command Console (`/host`) | Mobile DJ Controller (`/mobile`) |
+| :---: | :---: | :---: |
+| ![Big Screen Side-Scroller](./screenshots/bigscreen-side-scroller.png) | ![Host Admin Command Console](./screenshots/host-admin-console.png) | <img src="./screenshots/mobile-dj-controller.png" alt="Mobile DJ Controller" width="260" /> |
 
 ---
 
