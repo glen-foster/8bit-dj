@@ -352,6 +352,8 @@ def build_full_state(client_id: Optional[str] = None, include_host: bool = False
     # Determine the immediate next track for dual-deck preloading on bigscreen
     next_up_track = queue[0] if queue else next_seed
 
+    pending_list = database.get_pending_approvals()
+
     state: Dict[str, Any] = {
         "type": "state_sync",
         "server_time": time.time(),
@@ -361,6 +363,7 @@ def build_full_state(client_id: Optional[str] = None, include_host: bool = False
         "now_playing": enriched_now,
         "next_up_track": next_up_track,
         "queue": queue,
+        "pending_approvals_count": len(pending_list),
         "leaderboard": database.get_leaderboard(limit=8),
         "seed_pool": database.get_seed_pool(),
         "telemetry": ws_manager.get_telemetry(),
@@ -371,7 +374,7 @@ def build_full_state(client_id: Optional[str] = None, include_host: bool = False
         state["voted_queue_ids"] = database.get_client_voted_ids(client_id)
 
     if include_host:
-        state["pending_approvals"] = database.get_pending_approvals()
+        state["pending_approvals"] = pending_list
 
     return state
 

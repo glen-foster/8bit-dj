@@ -1,103 +1,143 @@
-# 8-Bit Jukebox MVP — Setup & Operations Guide
+# 8-Bit Arcade Jukebox (`8bit-dj`)
 
-An interactive 8-bit arcade music jukebox designed for a **Raspberry Pi 5** (or macOS) connected to a TV/projector and sound system via HDMI.
+Turn a **Raspberry Pi 5** (or any Mac / Linux machine) plugged into a TV or projector into an interactive **8-Bit Arcade Party Jukebox**.
 
-## Architecture Overview
-
-- **Backend ([`main.py`](./main.py), [`database.py`](./database.py), [`audio_engine.py`](./audio_engine.py), [`ai_scene_generator.py`](./ai_scene_generator.py))**:
-  - **FastAPI + SQLite (`jukebox.db`)**: Persists the song queue, votes (1 vote per `client_id` per track), DJ leaderboard, seed pool, and cached AI scenes across reboots.
-  - **Audio Pre-fetcher & EBU R128 Normalizer**: Background worker that pre-downloads the Now Playing track, Top 2 queued tracks, and Next Seed track using `yt-dlp` piped through `ffmpeg` (`silenceremove` + `loudnorm=I=-14:TP=-1.5:LRA=11`) into `/tmp/audio_cache/`, and cleans up old files after playback.
-  - **Gemini 2.5 Flash 8-Bit Scene Engine**: Generates custom retro stage titles, RPG battle logs, 4-color neon palettes, and 16x16 pixel-art sprites with animation behaviors (`bounce`, `scroll`, `float`, `rain`, `starfield`, `dancers`) for incoming songs.
-  - **Automatic Public HTTPS Tunnel**: Spawns an outbound SSH reverse tunnel (`localhost.run`) on startup and automatically updates the Big Screen QR code so guests can join over 5G/LTE or any Wi-Fi network without router configuration.
-- **Frontends**:
-  - **[`bigscreen.html`](./bigscreen.html) (`/bigscreen`)**: 1080p TV HUD with a 60fps audio-reactive `<canvas>`, Dual-Deck Web Audio API 6-second equal-power crossfader (`deckA` & `deckB`), Up Next Top 5 queue, Top DJs Leaderboard, RPG log ticker, and dynamic QR code.
-  - **[`mobile.html`](./mobile.html) (`/mobile`)**: Retro pocket DJ interface with persistent UUID (`localStorage`), random family-friendly 8-bit DJ tags + Re-Roll button, live voting, **Fast Track** (instant queue from Host seed pool), and **Open Search** (`ytmusicapi` search sent to Host Approval queue). Automatically reconnects and re-syncs on phone wake (`visibilitychange`).
-  - **[`host.html`](./host.html) (`/host`)**: PIN-protected (`HOST_PIN`) admin console with deck transport controls (`|<< RESTART`, `<< -15S`, `PLAY / PAUSE`, `+15S >>`), `VETO / 6S CROSSFADE SKIP`, 1-tap Open Search approval/rejection, and YouTube Music playlist ID seed loader.
+Guests scan a QR code on the TV to join from their phones (over 5G/LTE or Wi-Fi—no app install required), get a random retro DJ tag, vote on the live queue, or request tracks from YouTube Music while the TV renders 60fps audio-reactive 8-bit stages and custom AI-generated pixel-art sprites.
 
 ---
 
-## Deploying to Your Raspberry Pi 5 (Tomorrow's Checklist)
+## Features
 
-### Prerequisites on the Raspberry Pi 5
-1. Flash **Raspberry Pi OS Bookworm (64-bit with Desktop)** onto your microSD card / NVMe drive using **Raspberry Pi Imager**.
-2. In Raspberry Pi Imager settings (the gear icon / OS customization), enable **SSH**, set your username/password (e.g. `pi` or `glen`), and configure your Wi-Fi credentials.
-3. Boot the Pi 5 plugged into your TV/Projector via HDMI.
+- **60fps Audio-Reactive 8-Bit TV HUD (`/bigscreen`)**:
+  - **6 Built-In Retro Visualizer Stages**:
+    - **90s Arcade Beat-'Em-Up (`BRAWL`)**: 2.5D belt-scroller street brawler stage (*Streets of Rage* / *Final Fight* style) with sparring pixel fighters, hit sparks, 1P vs BOSS health bars, and audio-reactive trash-barrel flames.
+    - **Side-Scroller Platformer (`SCROLL`)**: Parallax clouds, hills, bouncing retro question blocks, and running/jumping pixel characters.
+    - **Classic Winamp LED Analyzer (`LED`)**: Segmented green/amber/red LED spectrum analyzer with gravity peak-hold caps and live oscilloscope ribbon.
+    - **Winamp Demoscene Fire (`FIRE`)**: Audio-reactive rising embers, dual sine plasma waves, and mirrored spectrum bars.
+    - **Midnight City Cruiser (`CITY`)**: Parallax skyscrapers with audio-reactive lit windows and scrolling night highway.
+    - **80s OutRun Synth Grid (`GRID`)**: Segmented synthwave sun, pixel mountain silhouette, and perspective cyber grid.
+  - **Gemini AI 8-Bit Scene & Sprite Generator (with Zero-Key Fallback)**:
+    - Uses **Gemini 2.5 Flash** (`google-genai`) to generate song-specific stage titles, RPG battle flavor text, 4-color neon palettes, and custom 16x16 pixel-art sprites tailored to each track's genre and lyrics.
+    - Works **100% out of the box without an API key** using built-in deterministic retro chiptune scenes and sprites.
+  - **Live Pending Approval Alert**: Flashes an alert banner on the main TV screen whenever a guest submits an Open Search track awaiting Host approval.
+
+- **Dual-Deck Web Audio Engine & Prioritized EBU R128 Pre-fetcher**:
+  - **6-Second Equal-Power Crossfader**: Seamlessly crossfades between `Deck A` and `Deck B` (via Web Audio API cosine/sine curves) 6 seconds before each track ends or when the Host triggers a skip.
+  - **Prioritized Background Pre-fetcher**: Downloads audio via `yt-dlp` and pipes it through `ffmpeg` with silence trimming and EBU R128 loudness normalization (`loudnorm=I=-14:TP=-1.5:LRA=11`) into `/tmp/audio_cache/`, always prioritizing `Now Playing` and `#1 Up Next` first.
+  - **Auto-DJ Seed Pool**: Automatically keeps at least 5 tracks in the queue from your chosen YouTube Music seed playlist so the party never hits dead air.
+
+- **Pocket Arcade Mobile DJ Controller (`/mobile`)**:
+  - **Automatic Public HTTPS Tunnel**: Spawns a free outbound SSH reverse tunnel (`localhost.run`) on startup and updates the TV QR code automatically—guests can scan and join over mobile data (5G/LTE) even if they aren't on the venue's Wi-Fi.
+  - **Two Request Modes**:
+    - **Fast Track**: Instant queueing from the Host's pre-approved Seed Playlist pool.
+    - **Open Search**: Full YouTube Music search (`ytmusicapi`) routed to the Host Approval queue.
+  - **Live Voting & DJ Leaderboard**: 1 vote per guest per track, automatic queue re-ordering, and a live Top DJs leaderboard.
+
+- **Host Admin Command Console (`/host` & TV Popup)**:
+  - **PIN-Free on Device, PIN-Protected Remotely**: Click the QR code box (or press `H`) on the TV to open the Host Console popup immediately with no PIN required on the local device; remote access over LAN or the public tunnel is protected by `HOST_PIN`.
+  - **System-Level Master Volume Slider (`0%–100%`, default `50%`)**: Controls OS PipeWire / WirePlumber HDMI audio volume (`wpctl`) on the Pi (or `osascript` on macOS).
+  - **YouTube Music Playlist Search & Loader**: Search for any party/genre playlist (e.g. `"80s Party"`, `"90s Hip Hop"`, `"Indie Dance"`) and load it into the Seed Pool with 1 click.
+  - **1-Click Minimize to Desktop**: Includes a `[ _ MINIMIZE TO DESKTOP ]` button (and `F11` keyboard support) to minimize the full-screen TV HUD to the Raspberry Pi taskbar anytime.
+
+- **Hotel-Style Captive Portal Wi-Fi Setup (`8BIT-JUKEBOX-SETUP`)**:
+  - Take your Pi to a new venue with unknown Wi-Fi: if the Pi has no internet connection for 25 seconds on boot, it automatically broadcasts an open Wi-Fi hotspot (`8BIT-JUKEBOX-SETUP`) and switches the TV QR code to a Wi-Fi join QR.
+  - Scanning the QR code on your phone automatically pops up the **8-Bit Captive Portal Wi-Fi Picker** (`http://10.42.0.1:8000/wifi-setup`) so you can select the venue's Wi-Fi and enter the password right from your phone.
 
 ---
 
-### Step 1: Copy the Project from Your Mac to the Pi
-Open a Terminal on your Mac and run `rsync` to copy the project (including your configured `.env` file with your `GEMINI_API_KEY`, while skipping the Mac-specific `venv` folder):
+## Quick Start on Raspberry Pi 5 (Raspberry Pi OS Bookworm / Trixie 64-bit)
 
+### 1. Clone the Repository on Your Raspberry Pi
 ```bash
-rsync -avz --exclude 'venv' --exclude '__pycache__' --exclude 'jukebox.db*' \
-  /Users/Glen.Foster/8bit-dj/ pi@raspberrypi.local:~/8bit-dj/
-```
-*(Replace `pi@raspberrypi.local` with your Pi's username and hostname or IP address, e.g., `glen@192.168.1.50`)*
-
----
-
-### Step 2: Run the Automated Pi Installer (`setup_pi.sh`)
-SSH into your Raspberry Pi 5 and run the setup script:
-
-```bash
-ssh pi@raspberrypi.local
+git clone https://github.com/glen-foster/8bit-dj.git ~/8bit-dj
 cd ~/8bit-dj
+```
+
+### 2. Run the Automated Installer (`setup_pi.sh`)
+```bash
 chmod +x setup_pi.sh
 ./setup_pi.sh
 ```
-
 What `./setup_pi.sh` does automatically:
-1. Installs system packages (`ffmpeg`, `mpv`, `chromium-browser`, `python3-venv`, `sqlite3`, `unclutter`).
-2. Creates `~/8bit-dj/venv` and installs all Python dependencies from `requirements.txt`.
-3. Installs, enables, and starts the `systemd` background service (`jukebox-backend.service`).
-4. Configures `~/.config/wayfire.ini` to launch Chromium in full-screen `--kiosk` mode with `--autoplay-policy=no-user-gesture-required` pointing to `http://localhost:8000/bigscreen`, and disables screen blanking (`dpms = false`).
+1. Installs system packages (`ffmpeg`, `mpv`, `nodejs`, `chromium`, `python3-venv`, `sqlite3`, `wlrctl`, `wtype`, `iptables`, `dnsmasq-base`).
+2. Creates `./venv` and installs all Python dependencies from `requirements.txt`.
+3. Creates `.env` from `.env.example` (if not already present).
+4. Configures and starts the `systemd` background service (`jukebox-backend.service`).
+5. Configures desktop autologin and launches Chromium in borderless full-screen mode (`launch_kiosk.sh`) pointing to `http://localhost:8000/bigscreen` at 50% default system volume.
 
----
-
-### Step 3: Reboot the Pi into Kiosk Mode
-Once `setup_pi.sh` completes:
-
+### 3. Configure Your `.env` (Recommended)
+Edit `~/8bit-dj/.env` to set your own `HOST_PIN` (for remote admin access) and optional `GEMINI_API_KEY`:
 ```bash
+nano ~/8bit-dj/.env
+```
+```ini
+# Change this before hosting a party! Used when accessing /host remotely
+HOST_PIN=1234
+
+# Optional: Google Gemini API Key for AI-generated custom 16x16 pixel sprites
+# Get a free key at https://aistudio.google.com/ (falls back to built-in 8-bit scenes if omitted)
+GEMINI_API_KEY=your_gemini_api_key_here
+```
+Then restart the backend service (or reboot into full-screen mode):
+```bash
+sudo systemctl restart jukebox-backend.service
+# Or reboot to test full-screen TV auto-start:
 sudo reboot
 ```
 
-When the Pi 5 finishes booting:
-- The **Big Screen HUD** will open automatically in full-screen kiosk mode on your TV/projector and begin playing audio immediately without needing a mouse click.
-- After ~3 seconds, the **QR Code** in the bottom-right corner will automatically switch to the live public `https://*.lhr.life/mobile` URL so anyone can scan it with their phone camera and start voting/requesting tracks.
+---
+
+## Running Locally on macOS or Linux
+
+You can also run the entire Jukebox on a laptop connected to a TV or speakers:
+
+```bash
+git clone https://github.com/glen-foster/8bit-dj.git
+cd 8bit-dj
+python3 -m venv venv
+./venv/bin/pip install -r requirements.txt
+cp .env.example .env
+./venv/bin/uvicorn main:app --host 0.0.0.0 --port 8000
+```
+*(Make sure `ffmpeg` and `node` are installed, e.g. `brew install ffmpeg node` on macOS).*
+
+Then open:
+- **Big Screen TV HUD**: `http://localhost:8000/bigscreen`
+- **Mobile DJ Controller**: `http://localhost:8000/mobile` (or scan the QR code on the Big Screen)
+- **Host Admin Console**: `http://localhost:8000/host` (or click the QR code box / press `H` on the Big Screen)
 
 ---
 
-## Day-to-Day Operations & Useful Commands
+## Keyboard Shortcuts on the Big Screen (`/bigscreen`)
 
-### Accessing the Interfaces
-- **Big Screen HUD (on Pi HDMI)**: `http://localhost:8000/bigscreen`
-- **Mobile DJ Controller**: Scan the QR code on the Big Screen (or visit `http://<pi-ip>:8000/mobile`)
-- **Host Admin Console**: Use the same public tunnel domain from the QR code with `/host` at the end (e.g., `https://xxxx.lhr.life/host`) or `http://<pi-ip>:8000/host`
-  - **Default Host PIN**: `1234` (change `HOST_PIN` in `.env` anytime)
+| Key / Action | Description |
+| :--- | :--- |
+| **`H`** or **Click QR Code Box** | Open / Close the Host Admin Console popup |
+| **`V`** | Cycle through the 6 retro visualizer stages (`AUTO`, `SCROLL`, `BRAWL`, `LED`, `FIRE`, `CITY`, `GRID`) |
+| **`F11`** | Toggle Full-Screen / Windowed mode (on Raspberry Pi / Desktop) |
+| **`Esc`** | Close the Host Admin Console popup |
 
-### Managing the Service on the Raspberry Pi
-- **View live logs (and see the active public tunnel URL)**:
+---
+
+## Useful Commands on the Raspberry Pi
+
+- **View live logs (and check the active public tunnel URL)**:
   ```bash
   sudo journalctl -u jukebox-backend.service -f
   ```
-- **Restart the backend (e.g. after editing `.env`)**:
+- **Restart the backend**:
   ```bash
   sudo systemctl restart jukebox-backend.service
   ```
-- **Stop the backend**:
-  ```bash
-  sudo systemctl stop jukebox-backend.service
-  ```
-- **Reset the database (clear all queue history, votes, and leaderboard)**:
+- **Reset the database (clear queue history, votes, and leaderboard)**:
   ```bash
   sudo systemctl stop jukebox-backend.service
   rm -f ~/8bit-dj/jukebox.db*
   sudo systemctl start jukebox-backend.service
   ```
 
-### Running Locally on Your Mac Anytime
-If you want to run the Jukebox on your Mac again:
-```bash
-cd /Users/Glen.Foster/8bit-dj
-./venv/bin/uvicorn main:app --host 0.0.0.0 --port 8000
-```
+---
+
+## License
+
+Released under the [MIT License](./LICENSE).

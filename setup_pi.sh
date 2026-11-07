@@ -25,6 +25,7 @@ sudo apt-get update -y
 sudo apt-get install -y \
   ffmpeg \
   mpv \
+  nodejs \
   python3 \
   python3-venv \
   python3-pip \
@@ -32,7 +33,9 @@ sudo apt-get install -y \
   sqlite3 \
   unclutter \
   wlrctl \
-  wtype
+  wtype \
+  iptables \
+  dnsmasq-base
 
 # Install chromium-browser (or chromium on Debian Bookworm)
 if apt-cache show chromium-browser >/dev/null 2>&1; then
@@ -115,10 +118,11 @@ if ! command -v chromium-browser >/dev/null 2>&1 && command -v chromium >/dev/nu
   CHROMIUM_BIN="chromium"
 fi
 
-KIOSK_CMD="${CHROMIUM_BIN} --start-fullscreen --password-store=basic --autoplay-policy=no-user-gesture-required --noerrdialogs --disable-infobars --check-for-update-interval=31536000 --app=http://localhost:${PORT}/bigscreen"
+chmod +x "${APP_DIR}/launch_kiosk.sh"
+KIOSK_CMD="${APP_DIR}/launch_kiosk.sh"
 
-# Configure labwc autostart (Bookworm default compositor)
-if ! grep -q "http://localhost:${PORT}/bigscreen" "${LABWC_AUTOSTART}"; then
+# Configure labwc autostart (Bookworm/Trixie default compositor)
+if ! grep -q "launch_kiosk.sh" "${LABWC_AUTOSTART}" && ! grep -q "http://localhost:${PORT}/bigscreen" "${LABWC_AUTOSTART}"; then
   echo "${KIOSK_CMD} &" >> "${LABWC_AUTOSTART}"
 fi
 chmod +x "${LABWC_AUTOSTART}"
