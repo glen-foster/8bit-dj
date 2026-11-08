@@ -84,7 +84,19 @@ function renderHUD(state) {
     preloadNextDeck(state.next_up_track);
   }
 
-  // Pending Host Approvals Indicator on Main Screen
+  // Party Mode Badge & Pending Host Approvals Indicator on Main Screen
+  const partyMode = state.party_mode || 'free_for_all';
+  const modeHudBadge = document.getElementById('partyModeHudBadge');
+  if (modeHudBadge) {
+    if (partyMode === 'host_approval') {
+      modeHudBadge.textContent = 'PUB / APPROVAL';
+      modeHudBadge.className = 'px-2 py-0.5 bg-amber-400/20 border border-amber-400 text-amber-300 text-[9px] xl:text-[10px] cursor-pointer';
+    } else {
+      modeHudBadge.textContent = 'FREE-FOR-ALL';
+      modeHudBadge.className = 'px-2 py-0.5 bg-emerald-400/20 border border-emerald-400 text-emerald-300 text-[9px] xl:text-[10px] cursor-pointer';
+    }
+  }
+
   const pendingCount = Number(state.pending_approvals_count || (state.pending_approvals ? state.pending_approvals.length : 0));
   const pendingBadge = document.getElementById('pendingApprovalBadge');
   const pendingBanner = document.getElementById('pendingApprovalBanner');
@@ -103,7 +115,7 @@ function renderHUD(state) {
     if (pendingBanner) pendingBanner.classList.add('hidden');
   }
 
-  // Up Next Queue (Top 5)
+  // Up Next Queue (Top 7)
   const q = state.queue || [];
   document.getElementById('queueCountBadge').textContent = `${q.length} IN QUEUE`;
   const upNextEl = document.getElementById('upNextList');
@@ -117,26 +129,33 @@ function renderHUD(state) {
       </div>
     `;
   } else {
-    upNextEl.innerHTML = q.slice(0, 7).map((item, idx) => `
-      <div class="p-3 bg-black/75 border-2 ${idx === 0 ? 'border-emerald-400' : 'border-gray-700'} flex items-center justify-between gap-3">
-        <div class="min-w-0 flex-1">
-          <div class="flex items-center gap-2.5 mb-1.5">
-            <span class="text-[11px] px-2 py-0.5 ${idx === 0 ? 'bg-emerald-400 text-black' : 'bg-gray-800 text-gray-200'} shrink-0">
-              #${idx + 1}
-            </span>
-            <span class="text-xs xl:text-sm text-white truncate">${item.title}</span>
+    upNextEl.innerHTML = q.slice(0, 7).map((item, idx) => {
+      const vScore = Number(item.votes || 0);
+      const vLabel = vScore > 0 ? `+${vScore}` : `${vScore}`;
+      const vBoxClass = vScore < 0
+        ? 'bg-red-950/50 border-red-500'
+        : 'bg-pink-600/30 border-pink-500';
+      return `
+        <div class="p-3 bg-black/75 border-2 ${idx === 0 ? 'border-emerald-400' : 'border-gray-700'} flex items-center justify-between gap-3">
+          <div class="min-w-0 flex-1">
+            <div class="flex items-center gap-2.5 mb-1.5">
+              <span class="text-[11px] px-2 py-0.5 ${idx === 0 ? 'bg-emerald-400 text-black' : 'bg-gray-800 text-gray-200'} shrink-0">
+                #${idx + 1}
+              </span>
+              <span class="text-xs xl:text-sm text-white truncate">${item.title}</span>
+            </div>
+            <div class="text-[10px] xl:text-xs text-gray-300 truncate">
+              ${item.artist} // DJ: <span class="text-amber-300">${item.requested_by_name}</span>
+              ${idx === 0 && item.audio_ready ? '<span class="text-emerald-400 ml-1">[READY]</span>' : ''}
+            </div>
           </div>
-          <div class="text-[10px] xl:text-xs text-gray-300 truncate">
-            ${item.artist} // DJ: <span class="text-amber-300">${item.requested_by_name}</span>
-            ${idx === 0 && item.audio_ready ? '<span class="text-emerald-400 ml-1">[READY]</span>' : ''}
+          <div class="px-3 py-1.5 ${vBoxClass} border-2 text-center shrink-0">
+            <div class="text-sm xl:text-base ${vScore < 0 ? 'text-red-400' : 'highlight-text'}">${vLabel}</div>
+            <div class="text-[8px] xl:text-[9px] text-gray-200">SCORE</div>
           </div>
         </div>
-        <div class="px-3 py-1.5 bg-pink-600/30 border-2 border-pink-500 text-center shrink-0">
-          <div class="text-sm xl:text-base highlight-text">${item.votes}</div>
-          <div class="text-[8px] xl:text-[9px] text-gray-200">VOTES</div>
-        </div>
-      </div>
-    `).join('');
+      `;
+    }).join('');
   }
 
   // Leaderboard

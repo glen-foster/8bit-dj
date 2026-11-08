@@ -92,7 +92,7 @@
     <section id="panelVote" class="space-y-3">
       <div class="flex items-center justify-between text-[9px] text-gray-400 px-1">
         <span>LIVE VOTING PIPELINE</span>
-        <span>1 VOTE / TRACK</span>
+        <span>▲ UP / ▼ DOWN VOTE</span>
       </div>
       <div id="mobileQueueList" class="space-y-2.5">
         <!-- Populated via JS -->
@@ -112,12 +112,15 @@
       </div>
     </section>
 
-    <!-- TAB 3: OPEN SEARCH (Queries ytmusicapi -> Sends to Host Approval Queue) -->
+    <!-- TAB 3: OPEN SEARCH (Queries ytmusicapi -> Instant Queue in Free-For-All, or Host Approval in Pub Mode) -->
     <section id="panelSearch" class="hidden space-y-3">
       <div class="retro-card-pink p-3">
-        <div class="text-[10px] text-pink-400 mb-1">OPEN SEARCH // YOUTUBE MUSIC &amp; SPOTIFY</div>
-        <p class="text-[8px] text-gray-300 leading-relaxed mb-3">
-          SEARCH ANY SONG OR PASTE A SPOTIFY TRACK LINK. REQUESTS GO TO THE HOST FOR 1-TAP APPROVAL!
+        <div class="flex items-center justify-between gap-2 mb-1">
+          <div class="text-[10px] text-pink-400">OPEN SEARCH // YT MUSIC &amp; SPOTIFY</div>
+          <span id="mobilePartyModeBadge" class="px-1.5 py-0.5 bg-emerald-400 text-black text-[7px] shrink-0">FREE-FOR-ALL</span>
+        </div>
+        <p id="openSearchDesc" class="text-[8px] text-gray-300 leading-relaxed mb-3">
+          SEARCH ANY SONG OR PASTE A SPOTIFY TRACK LINK. DROPS STRAIGHT INTO THE LIVE QUEUE!
         </p>
         <form onsubmit="submitOpenSearch(event)" class="flex gap-2">
           <input

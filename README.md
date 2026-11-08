@@ -44,15 +44,16 @@ Guests scan a QR code on the TV to join from their phones (over 5G/LTE or Wi-Fi�
 
 - **Pocket Arcade Mobile DJ Controller (`/mobile`)**:
   - **Automatic Public HTTPS Tunnel**: Spawns a free outbound SSH reverse tunnel (`localhost.run`) on startup and updates the TV QR code automatically—guests can scan and join over mobile data (5G/LTE) even if they aren't on the venue's Wi-Fi.
-  - **Two Request Modes**:
-    - **Fast Track**: Instant queueing from the Host's pre-approved Seed Playlist pool.
-    - **Open Search**: Full YouTube Music search (`ytmusicapi`) or Spotify track link paste routed to the Host Approval queue.
-  - **Live Voting & DJ Leaderboard**: 1 vote per guest per track, automatic queue re-ordering, and a live Top DJs leaderboard.
+  - **Two Party Modes (Switchable Live by Host)**:
+    - **Free-For-All Mode (Default — Private Parties)**: Zero host bottleneck—guests can search any song on YouTube Music or paste a Spotify link and drop it straight into the live queue.
+    - **Host Approval Mode (Public / Pub Venues)**: Fast Track picks from the Seed Pool queue immediately, while Open Search requests go to the Host Approval queue for 1-tap moderation.
+  - **Live Up / Down Voting (`▲` / `▼`) & DJ Leaderboard**: Guests can upvote (`+1`) or downvote (`-1`) tracks in the live queue to boost favourites to `#1 Up Next` or demote unwanted songs below the Auto-DJ seed tracks.
 
 - **Host Admin Command Console (`/host` & TV Popup)**:
   - **PIN-Free on Device, PIN-Protected Remotely**: Click the QR code box (or press `H`) on the TV to open the Host Console popup immediately with no PIN required on the local device; remote access over LAN or the public tunnel is protected by `HOST_PIN`.
+  - **1-Click Party Mode Toggle**: Switch between `FREE-FOR-ALL (PRIVATE PARTY)` and `HOST APPROVAL (PUB / PUBLIC)` at any time (switching to Free-For-All automatically approves any waiting requests).
   - **System-Level Master Volume Slider (`0%–100%`, default `50%`)**: Controls OS PipeWire / WirePlumber HDMI audio volume (`wpctl`) on the Pi (or `osascript` on macOS).
-  - **YouTube Music Playlist Search & Loader**: Search for any party/genre playlist (e.g. `"80s Party"`, `"90s Hip Hop"`, `"Indie Dance"`) and load it into the Seed Pool with 1 click.
+  - **YouTube Music & Spotify Playlist Loader**: Search for any party/genre playlist (e.g. `"80s Party"`, `"90s Hip Hop"`, `"Indie Dance"`) and load it into the Seed Pool with 1 click.
   - **1-Click Minimize to Desktop**: Includes a `[ _ MINIMIZE TO DESKTOP ]` button (and `F11` keyboard support) to minimize the full-screen TV HUD to the Raspberry Pi taskbar anytime.
 
 - **Hotel-Style Captive Portal Wi-Fi Setup (`8BIT-JUKEBOX-SETUP`)**:

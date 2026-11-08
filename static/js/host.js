@@ -97,12 +97,46 @@ function renderHostState(state) {
       (np.scene && np.scene.stage_title) ? np.scene.stage_title : 'STAGE 01';
   }
 
+  // Sync Party Mode Buttons & Hint
+  const partyMode = state.party_mode || 'free_for_all';
+  const btnFree = document.getElementById('partyModeBtnFree');
+  const btnApproval = document.getElementById('partyModeBtnApproval');
+  const modeHint = document.getElementById('hostPartyModeHint');
+  if (btnFree && btnApproval) {
+    if (partyMode === 'host_approval') {
+      btnApproval.className = 'arcade-btn px-2.5 py-1 bg-amber-400 text-black text-[7px]';
+      btnFree.className = 'arcade-btn px-2.5 py-1 bg-[#1b113a] text-[#00f5d4] text-[7px]';
+      if (modeHint) {
+        modeHint.textContent = 'PUB / MODERATED MODE: OPEN SEARCH REQUESTS REQUIRE HOST APPROVAL';
+        modeHint.className = 'text-[7px] text-amber-300';
+      }
+    } else {
+      btnFree.className = 'arcade-btn px-2.5 py-1 bg-emerald-400 text-black text-[7px]';
+      btnApproval.className = 'arcade-btn px-2.5 py-1 bg-[#1b113a] text-amber-300 text-[7px]';
+      if (modeHint) {
+        modeHint.textContent = 'GUEST SEARCHES DROP STRAIGHT INTO LIVE QUEUE (UP/DOWN VOTING ACTIVE)';
+        modeHint.className = 'text-[7px] text-emerald-300';
+      }
+    }
+  }
+
   // Pending Open Search Approvals
   const pending = state.pending_approvals || [];
   document.getElementById('pendingCountBadge').textContent = pending.length;
   const pList = document.getElementById('pendingApprovalList');
   if (pending.length === 0) {
-    pList.innerHTML = `<div class="text-[8px] text-gray-500 py-4 text-center">NO PENDING OPEN SEARCH REQUESTS</div>`;
+    if (partyMode === 'free_for_all') {
+      pList.innerHTML = `
+        <div class="p-3 bg-emerald-950/30 border border-emerald-500/40 text-center space-y-1.5">
+          <div class="text-[8px] text-emerald-300">FREE-FOR-ALL MODE ACTIVE</div>
+          <div class="text-[7px] text-gray-400 leading-relaxed">
+            ALL GUEST OPEN SEARCHES BYPASS APPROVAL &amp; GO STRAIGHT TO THE LIVE QUEUE. SWITCH TO "HOST APPROVAL" ABOVE FOR PUBLIC / PUB EVENTS.
+          </div>
+        </div>
+      `;
+    } else {
+      pList.innerHTML = `<div class="text-[8px] text-gray-500 py-4 text-center">NO PENDING OPEN SEARCH REQUESTS</div>`;
+    }
   } else {
     pList.innerHTML = pending.map(item => `
       <div class="p-2 bg-black/80 border-2 border-amber-400 flex items-center justify-between gap-2">
@@ -261,6 +295,11 @@ async function setHostVizMode(modeId, label) {
 
   await sendTransportControl(`set_viz_mode:${modeId}`, 0);
   showHostToast(`VISUALIZER SET TO: ${label}`);
+}
+
+async function setHostPartyMode(mode) {
+  const target = mode === 'host_approval' ? 'host_approval' : 'free_for_all';
+  await sendTransportControl(`set_party_mode:${target}`, 0);
 }
 
 function onVolumeSliderInput(val) {

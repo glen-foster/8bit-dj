@@ -18,6 +18,8 @@ const CLIENT_ID = getOrCreateClientId();
 let currentTab = 'vote';
 let latestState = null;
 let votedQueueIds = new Set();
+let userVotes = {}; // { [queue_id]: 1 | -1 }
+let lastSearchResults = [];
 let ws = null;
 let reconnectTimer = null;
 
@@ -58,6 +60,29 @@ function renderMobileState(state) {
   if (Array.isArray(state.voted_queue_ids)) {
     votedQueueIds = new Set(state.voted_queue_ids);
   }
+  if (state.user_votes && typeof state.user_votes === 'object') {
+    userVotes = state.user_votes;
+  }
+
+  // Update Party Mode Badge & Open Search Description
+  const partyMode = state.party_mode || 'free_for_all';
+  const modeBadge = document.getElementById('mobilePartyModeBadge');
+  const openDesc = document.getElementById('openSearchDesc');
+  if (modeBadge) {
+    if (partyMode === 'host_approval') {
+      modeBadge.textContent = 'HOST APPROVAL';
+      modeBadge.className = 'px-1.5 py-0.5 bg-amber-400 text-black text-[7px] shrink-0';
+    } else {
+      modeBadge.textContent = 'FREE-FOR-ALL';
+      modeBadge.className = 'px-1.5 py-0.5 bg-emerald-400 text-black text-[7px] shrink-0';
+    }
+  }
+  if (openDesc) {
+    openDesc.textContent =
+      partyMode === 'host_approval'
+        ? 'PUB / MODERATED MODE: SEARCH ANY SONG OR PASTE A SPOTIFY LINK. REQUESTS GO TO THE HOST FOR 1-TAP APPROVAL!'
+        : 'FREE-FOR-ALL PARTY MODE: SEARCH ANY SONG OR PASTE A SPOTIFY LINK TO DROP IT STRAIGHT INTO THE LIVE QUEUE!';
+  }
 
   const np = state.now_playing;
   if (np) {
@@ -68,7 +93,7 @@ function renderMobileState(state) {
       (np.scene && np.scene.stage_title) ? np.scene.stage_title : 'STAGE 01: 8-BIT ARENA';
   }
 
-  // Render Active Queue
+  // Render Active Queue with Up / Down Voting
   const queue = state.queue || [];
   document.getElementById('tabQueueCount').textContent = queue.length;
   const qContainer = document.getElementById('mobileQueueList');
@@ -80,16 +105,18 @@ function renderMobileState(state) {
         <p class="text-[9px] text-gray-400 leading-relaxed mb-4">
           AUTO-DJ IS SPINNING SEED TRACKS. TAP FAST TRACK OR OPEN SEARCH TO DROP THE NEXT SONG!
         </p>
-        <button onclick="switchTab('fast')" class="retro-btn px-4 py-2.5 bg-[#00f5d4] text-black text-[9px]">
-          BROWSE FAST TRACKS
+        <button onclick="switchTab('search')" class="retro-btn px-4 py-2.5 bg-[#00f5d4] text-black text-[9px]">
+          SEARCH ANY SONG
         </button>
       </div>
     `;
   } else {
     qContainer.innerHTML = queue.map((item, idx) => {
-      const hasVoted = votedQueueIds.has(item.id);
+      const myVote = Number(userVotes[item.id] || userVotes[String(item.id)] || (votedQueueIds.has(item.id) ? 1 : 0));
+      const scoreColor = item.votes > 0 ? 'text-[#00f5d4]' : (item.votes < 0 ? 'text-red-400' : 'text-gray-300');
+      const scoreLabel = item.votes > 0 ? `+${item.votes}` : `${item.votes}`;
       return `
-        <div class="retro-card p-3 flex items-center justify-between gap-3">
+        <div class="retro-card p-3 flex items-center justify-between gap-2.5">
           <div class="min-w-0 flex-1">
             <div class="flex items-center gap-2 mb-1">
               <span class="px-1.5 py-0.5 text-[8px] ${idx === 0 ? 'bg-emerald-400 text-black' : 'bg-gray-800 text-gray-300'}">
@@ -100,18 +127,34 @@ function renderMobileState(state) {
             <div class="text-[8px] text-gray-400 truncate mb-1">${escapeHtml(item.artist)}</div>
             <div class="text-[7px] text-amber-300">REQ BY: ${escapeHtml(item.requested_by_name)}</div>
           </div>
-          <button
-            onclick="voteTrack(${item.id})"
-            ${hasVoted ? 'disabled' : ''}
-            class="retro-btn px-3 py-2.5 text-center shrink-0 ${
-              hasVoted
-                ? 'bg-gray-800 text-emerald-400 border-emerald-400 opacity-80'
-                : 'bg-pink-600 text-white hover:bg-pink-500'
-            }"
-          >
-            <div class="text-xs">${item.votes}</div>
-            <div class="text-[7px] mt-0.5">${hasVoted ? 'VOTED' : '+1 VOTE'}</div>
-          </button>
+          <div class="flex items-center gap-1.5 shrink-0">
+            <button
+              onclick="voteTrack(${item.id}, 1)"
+              title="Upvote Track (+1)"
+              class="retro-btn px-2.5 py-2 text-center ${
+                myVote === 1
+                  ? 'bg-emerald-400 text-black border-white'
+                  : 'bg-[#120b29] text-emerald-400 border-emerald-400 hover:bg-emerald-900/50'
+              }"
+            >
+              <div class="text-[10px] leading-none">▲</div>
+            </button>
+            <div class="min-w-[34px] text-center px-1">
+              <div class="text-xs ${scoreColor}">${scoreLabel}</div>
+              <div class="text-[6px] text-gray-400 mt-0.5">SCORE</div>
+            </div>
+            <button
+              onclick="voteTrack(${item.id}, -1)"
+              title="Downvote Track (-1)"
+              class="retro-btn px-2.5 py-2 text-center ${
+                myVote === -1
+                  ? 'bg-red-600 text-white border-white'
+                  : 'bg-[#120b29] text-pink-400 border-pink-500 hover:bg-pink-900/50'
+              }"
+            >
+              <div class="text-[10px] leading-none">▼</div>
+            </button>
+          </div>
         </div>
       `;
     }).join('');
@@ -139,6 +182,44 @@ function renderMobileState(state) {
           }"
         >
           ${inQueue ? 'ACTIVE' : '+ QUEUE'}
+        </button>
+      </div>
+    `;
+  }).join('');
+
+  if (lastSearchResults.length > 0) {
+    renderSearchResults(lastSearchResults);
+  }
+}
+
+function renderSearchResults(results) {
+  const container = document.getElementById('searchResultsList');
+  if (!container) return;
+  const partyMode = (latestState && latestState.party_mode) ? latestState.party_mode : 'free_for_all';
+  const queue = (latestState && latestState.queue) ? latestState.queue : [];
+  const activeIds = new Set(queue.map(q => q.video_id));
+  if (latestState && latestState.now_playing) {
+    activeIds.add(latestState.now_playing.video_id);
+  }
+
+  container.innerHTML = results.map(track => {
+    const inQueue = activeIds.has(track.video_id);
+    const btnLabel = inQueue ? 'ACTIVE' : (partyMode === 'host_approval' ? 'ASK HOST' : '+ QUEUE');
+    const btnClass = inQueue
+      ? 'bg-gray-800 text-gray-500 border-gray-600'
+      : (partyMode === 'host_approval' ? 'bg-pink-600 text-white' : 'bg-[#00f5d4] text-black');
+    return `
+      <div class="retro-card-pink p-3 flex items-center justify-between gap-3">
+        <div class="min-w-0 flex-1">
+          <div class="text-[10px] text-white truncate mb-1">${escapeHtml(track.title)}</div>
+          <div class="text-[8px] text-gray-300 truncate">${escapeHtml(track.artist)}</div>
+        </div>
+        <button
+          onclick='requestSong(${JSON.stringify(track).replace(/'/g, "&#39;")}, "open_search")'
+          ${inQueue ? 'disabled' : ''}
+          class="retro-btn px-3 py-2 text-[8px] shrink-0 ${btnClass}"
+        >
+          ${btnLabel}
         </button>
       </div>
     `;
@@ -174,20 +255,32 @@ async function rerollUsername() {
   }
 }
 
-async function voteTrack(queueId) {
+async function voteTrack(queueId, direction = 1) {
   try {
     const res = await fetch('/api/vote', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ client_id: CLIENT_ID, queue_id: queueId })
+      body: JSON.stringify({ client_id: CLIENT_ID, queue_id: queueId, direction: direction })
     });
     const data = await res.json();
     if (!res.ok) {
-      showToast(data.detail || "ALREADY VOTED!", true);
+      showToast(data.detail || "VOTE FAILED!", true);
       return;
     }
-    votedQueueIds.add(queueId);
-    showToast("+1UP VOTE REGISTERED!");
+    if (data.user_vote === 0) {
+      delete userVotes[queueId];
+      votedQueueIds.delete(queueId);
+      showToast("VOTE REMOVED");
+    } else {
+      userVotes[queueId] = data.user_vote;
+      if (data.user_vote > 0) {
+        votedQueueIds.add(queueId);
+        showToast("▲ +1 UPVOTE REGISTERED!");
+      } else {
+        votedQueueIds.delete(queueId);
+        showToast("▼ -1 DOWNVOTE REGISTERED!");
+      }
+    }
   } catch (e) {
     showToast("VOTE FAILED", true);
   }
@@ -234,24 +327,12 @@ async function submitOpenSearch(e) {
     const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
     const data = await res.json();
     const results = data.results || [];
+    lastSearchResults = results;
     if (results.length === 0) {
       container.innerHTML = `<div class="text-center text-[9px] text-gray-400 py-6">NO TRACKS FOUND. TRY ANOTHER QUERY!</div>`;
       return;
     }
-    container.innerHTML = results.map(track => `
-      <div class="retro-card-pink p-3 flex items-center justify-between gap-3">
-        <div class="min-w-0 flex-1">
-          <div class="text-[10px] text-white truncate mb-1">${escapeHtml(track.title)}</div>
-          <div class="text-[8px] text-gray-300 truncate">${escapeHtml(track.artist)}</div>
-        </div>
-        <button
-          onclick='requestSong(${JSON.stringify(track).replace(/'/g, "&#39;")}, "open_search")'
-          class="retro-btn px-3 py-2 bg-pink-600 text-white text-[8px] shrink-0"
-        >
-          ASK HOST
-        </button>
-      </div>
-    `).join('');
+    renderSearchResults(results);
   } catch (err) {
     container.innerHTML = `<div class="text-center text-[9px] text-red-400 py-6">SEARCH ERROR. PLEASE RETRY.</div>`;
   }

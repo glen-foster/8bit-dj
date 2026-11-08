@@ -379,6 +379,7 @@ def build_full_state(client_id: Optional[str] = None, include_host: bool = False
         "public_url": get_public_mobile_url(),
         "wifi_status": wifi_manager.get_wifi_status(),
         "system_volume": get_system_volume(),
+        "party_mode": database.get_party_mode(),
         "now_playing": enriched_now,
         "next_up_track": next_up_track,
         "queue": queue,
@@ -391,6 +392,7 @@ def build_full_state(client_id: Optional[str] = None, include_host: bool = False
     if client_id:
         state["user"] = database.ensure_user(client_id)
         state["voted_queue_ids"] = database.get_client_voted_ids(client_id)
+        state["user_votes"] = database.get_client_votes_map(client_id)
 
     if include_host:
         state["pending_approvals"] = pending_list
@@ -411,6 +413,7 @@ async def broadcast_state() -> None:
             if cid and role == "mobile":
                 payload["user"] = database.ensure_user(cid)
                 payload["voted_queue_ids"] = database.get_client_voted_ids(cid)
+                payload["user_votes"] = database.get_client_votes_map(cid)
             await ws.send_json(payload)
         except Exception:
             dead.append(ws)
@@ -471,6 +474,7 @@ class QueueTrackRequest(BaseModel):
 class VoteRequest(BaseModel):
     client_id: str
     queue_id: int
+    direction: int = 1  # +1 for upvote, -1 for downvote
 
 
 class HostPinVerifyRequest(BaseModel):
@@ -666,9 +670,11 @@ async def api_search(q: str = Query(..., min_length=1)) -> Dict[str, Any]:
 
 @app.post("/api/request")
 async def api_request_track(req: QueueTrackRequest) -> Dict[str, Any]:
-    # Fast Track songs go straight to the active voting queue; Open Search goes to Host Approval
+    # In Free-For-All mode (default for private parties), all requests go straight to the live queue.
+    # In Host Approval mode (for public venues/pubs), Open Search songs require Host approval.
+    party_mode = database.get_party_mode()
     seed_ids = {t["video_id"] for t in database.get_seed_pool()}
-    if req.mode == "fast_track" or req.video_id in seed_ids:
+    if party_mode == "free_for_all" or req.mode == "fast_track" or req.video_id in seed_ids:
         target_status = "queued"
     else:
         target_status = "pending_approval"
@@ -700,13 +706,15 @@ async def api_request_track(req: QueueTrackRequest) -> Dict[str, Any]:
         "ok": True,
         "already_queued": res["already_queued"],
         "status": target_status,
+        "party_mode": party_mode,
         "item": res["item"],
     }
 
 
 @app.post("/api/vote")
 async def api_vote(req: VoteRequest) -> Dict[str, Any]:
-    res = database.cast_vote(req.queue_id, req.client_id)
+    direction = -1 if int(req.direction) < 0 else 1
+    res = database.cast_vote(req.queue_id, req.client_id, direction=direction)
     if not res["ok"]:
         raise HTTPException(status_code=400, detail=res["reason"])
 
@@ -824,6 +832,26 @@ async def api_host_action(req: HostActionRequest, request: Request) -> Dict[str,
             prefetch_engine.trigger_Pass()
         await broadcast_state()
         return {"ok": True, "item": item}
+
+    elif req.action == "approve_all":
+        count = database.approve_all_pending_requests()
+        if prefetch_engine:
+            prefetch_engine.trigger_Pass()
+        await broadcast_state()
+        return {"ok": True, "count": count, "message": f"APPROVED ALL {count} PENDING TRACKS!"}
+
+    elif req.action.startswith("set_party_mode:"):
+        raw_mode = req.action.split(":", 1)[1].strip()
+        new_mode = database.set_party_mode(raw_mode)
+        if prefetch_engine:
+            prefetch_engine.trigger_Pass()
+        await broadcast_state()
+        label = (
+            "FREE-FOR-ALL (PRIVATE PARTY — INSTANT QUEUE)"
+            if new_mode == "free_for_all"
+            else "HOST APPROVAL (PUBLIC / PUB MODERATED)"
+        )
+        return {"ok": True, "party_mode": new_mode, "message": f"PARTY MODE SET TO: {label}"}
 
     elif req.action == "reject" and req.queue_id is not None:
         ok = database.reject_or_remove_track(req.queue_id)
@@ -951,7 +979,8 @@ async def websocket_endpoint(
 
             elif mtype == "vote":
                 qid = int(msg.get("queue_id", 0))
-                res = database.cast_vote(qid, client_id)
+                vdir = -1 if int(msg.get("direction", 1)) < 0 else 1
+                res = database.cast_vote(qid, client_id, direction=vdir)
                 if res["ok"]:
                     if prefetch_engine:
                         prefetch_engine.trigger_Pass()

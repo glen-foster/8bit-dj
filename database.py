@@ -136,6 +136,7 @@ def init_db() -> None:
             CREATE TABLE IF NOT EXISTS votes (
                 queue_id INTEGER NOT NULL,
                 client_id TEXT NOT NULL,
+                direction INTEGER NOT NULL DEFAULT 1,
                 created_at REAL DEFAULT (strftime('%s','now')),
                 PRIMARY KEY (queue_id, client_id),
                 FOREIGN KEY (queue_id) REFERENCES queue(id) ON DELETE CASCADE
@@ -164,6 +165,18 @@ def init_db() -> None:
                 value TEXT NOT NULL
             );
             """
+        )
+
+        # Migrate existing votes table if 'direction' column does not exist yet
+        vote_cols = {
+            r["name"] for r in conn.execute("PRAGMA table_info(votes)").fetchall()
+        }
+        if "direction" not in vote_cols:
+            conn.execute("ALTER TABLE votes ADD COLUMN direction INTEGER NOT NULL DEFAULT 1")
+
+        # Default party mode: 'free_for_all' (Private Party / instant queue) vs 'host_approval' (Pub / moderated)
+        conn.execute(
+            "INSERT OR IGNORE INTO settings (key, value) VALUES ('party_mode', 'free_for_all')"
         )
 
         # Recover from abrupt reboot: if more than one track is 'playing', keep only the latest
@@ -284,7 +297,7 @@ def add_to_queue(
 
         if not is_seed and status == "queued":
             conn.execute(
-                "INSERT OR IGNORE INTO votes (queue_id, client_id) VALUES (?, ?)",
+                "INSERT OR IGNORE INTO votes (queue_id, client_id, direction) VALUES (?, ?, 1)",
                 (queue_id, client_id),
             )
             conn.execute(
@@ -297,27 +310,77 @@ def add_to_queue(
         return {"already_queued": False, "item": dict(row)}
 
 
-def cast_vote(queue_id: int, client_id: str) -> Dict[str, Any]:
+def cast_vote(queue_id: int, client_id: str, direction: int = 1) -> Dict[str, Any]:
+    """
+    Casts an upvote (`direction = 1`) or downvote (`direction = -1`) on a queued track.
+    - If the guest has not voted on this track yet, records their `+1` or `-1` vote.
+    - If the guest previously voted in the opposite direction, flips their vote (`+2` or `-2` delta).
+    - If the guest taps the same vote direction again, toggles/removes their vote.
+    """
     ensure_user(client_id)
+    target_dir = 1 if int(direction) >= 0 else -1
+
     with get_conn() as conn:
         item = conn.execute("SELECT * FROM queue WHERE id = ? AND status = 'queued'", (queue_id,)).fetchone()
         if not item:
             return {"ok": False, "reason": "Track is no longer in the active queue."}
 
         existing = conn.execute(
-            "SELECT 1 FROM votes WHERE queue_id = ? AND client_id = ?",
+            "SELECT direction FROM votes WHERE queue_id = ? AND client_id = ?",
             (queue_id, client_id),
         ).fetchone()
+
         if existing:
-            return {"ok": False, "reason": "ALREADY VOTED! 1 VOTE PER TRACK."}
+            old_dir = int(existing["direction"] or 1)
+            if old_dir == target_dir:
+                # Toggle off existing vote
+                conn.execute(
+                    "DELETE FROM votes WHERE queue_id = ? AND client_id = ?",
+                    (queue_id, client_id),
+                )
+                conn.execute(
+                    "UPDATE queue SET votes = votes - ? WHERE id = ?",
+                    (old_dir, queue_id),
+                )
+                conn.execute(
+                    "UPDATE users SET votes_cast = MAX(0, votes_cast - 1) WHERE client_id = ?",
+                    (client_id,),
+                )
+                conn.commit()
+                updated = conn.execute("SELECT * FROM queue WHERE id = ?", (queue_id,)).fetchone()
+                return {
+                    "ok": True,
+                    "action": "removed",
+                    "user_vote": 0,
+                    "item": dict(updated),
+                }
+            else:
+                # Flip vote direction (+1 -> -1 gives delta -2; -1 -> +1 gives delta +2)
+                delta = target_dir - old_dir
+                conn.execute(
+                    "UPDATE votes SET direction = ?, created_at = ? WHERE queue_id = ? AND client_id = ?",
+                    (target_dir, time.time(), queue_id, client_id),
+                )
+                conn.execute(
+                    "UPDATE queue SET votes = votes + ? WHERE id = ?",
+                    (delta, queue_id),
+                )
+                conn.commit()
+                updated = conn.execute("SELECT * FROM queue WHERE id = ?", (queue_id,)).fetchone()
+                return {
+                    "ok": True,
+                    "action": "switched",
+                    "user_vote": target_dir,
+                    "item": dict(updated),
+                }
 
         conn.execute(
-            "INSERT INTO votes (queue_id, client_id) VALUES (?, ?)",
-            (queue_id, client_id),
+            "INSERT INTO votes (queue_id, client_id, direction) VALUES (?, ?, ?)",
+            (queue_id, client_id, target_dir),
         )
         conn.execute(
-            "UPDATE queue SET votes = votes + 1 WHERE id = ?",
-            (queue_id,),
+            "UPDATE queue SET votes = votes + ? WHERE id = ?",
+            (target_dir, queue_id),
         )
         conn.execute(
             "UPDATE users SET votes_cast = votes_cast + 1 WHERE client_id = ?",
@@ -325,7 +388,12 @@ def cast_vote(queue_id: int, client_id: str) -> Dict[str, Any]:
         )
         conn.commit()
         updated = conn.execute("SELECT * FROM queue WHERE id = ?", (queue_id,)).fetchone()
-        return {"ok": True, "item": dict(updated)}
+        return {
+            "ok": True,
+            "action": "added",
+            "user_vote": target_dir,
+            "item": dict(updated),
+        }
 
 
 def get_client_voted_ids(client_id: str) -> List[int]:
@@ -334,11 +402,25 @@ def get_client_voted_ids(client_id: str) -> List[int]:
             """
             SELECT v.queue_id FROM votes v
             JOIN queue q ON q.id = v.queue_id
-            WHERE v.client_id = ? AND q.status = 'queued'
+            WHERE v.client_id = ? AND q.status = 'queued' AND v.direction > 0
             """,
             (client_id,),
         ).fetchall()
         return [r["queue_id"] for r in rows]
+
+
+def get_client_votes_map(client_id: str) -> Dict[int, int]:
+    """Returns `{queue_id: direction}` (`1` or `-1`) for all active queued tracks voted on by `client_id`."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT v.queue_id, v.direction FROM votes v
+            JOIN queue q ON q.id = v.queue_id
+            WHERE v.client_id = ? AND q.status = 'queued'
+            """,
+            (client_id,),
+        ).fetchall()
+        return {int(r["queue_id"]): int(r["direction"] or 1) for r in rows}
 
 
 def ensure_minimum_queue_size(min_count: int = 5) -> None:
@@ -444,15 +526,43 @@ def approve_request(queue_id: int) -> Optional[Dict[str, Any]]:
             (queue_id,),
         )
         conn.execute(
-            "INSERT OR IGNORE INTO votes (queue_id, client_id) VALUES (?, ?)",
+            "INSERT OR IGNORE INTO votes (queue_id, client_id, direction) VALUES (?, ?, 1)",
             (queue_id, row["requested_by_id"]),
         )
         conn.execute(
-            "UPDATE users SET requests_count = requests_count + 1 WHERE client_id = ?",
+            "UPDATE users SET requests_count = requests_count + 1, votes_cast = votes_cast + 1 WHERE client_id = ?",
             (row["requested_by_id"],),
         )
         conn.commit()
         return dict(conn.execute("SELECT * FROM queue WHERE id = ?", (queue_id,)).fetchone())
+
+
+def approve_all_pending_requests() -> int:
+    """Approves all tracks currently awaiting host approval (e.g. when switching to Free-For-All mode)."""
+    pending = get_pending_approvals()
+    count = 0
+    for item in pending:
+        if approve_request(int(item["id"])):
+            count += 1
+    return count
+
+
+def get_party_mode() -> str:
+    """
+    Returns the active party mode:
+    - `'free_for_all'` (default, Private Party): Open Search requests go straight to the live queue.
+    - `'host_approval'` (Public / Pub): Open Search requests require Host approval before entering the queue.
+    """
+    val = get_setting("party_mode", "free_for_all").strip().lower()
+    return "host_approval" if val == "host_approval" else "free_for_all"
+
+
+def set_party_mode(mode: str) -> str:
+    normalized = "host_approval" if str(mode).strip().lower() == "host_approval" else "free_for_all"
+    set_setting("party_mode", normalized)
+    if normalized == "free_for_all":
+        approve_all_pending_requests()
+    return normalized
 
 
 def reject_or_remove_track(queue_id: int) -> bool:
