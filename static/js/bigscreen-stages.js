@@ -264,11 +264,11 @@ function drawPixelMatrix(matrix, startX, startY, scale, paletteColors, flipX = f
 // STAGE STYLE 1: SIDE-SCROLLER PLATFORMER (Great for character/dancer sets!)
 // -------------------------------------------------------------------------
 function renderSideScrollerStage(pal, bass, mid, treble) {
-  const groundY = Math.floor(H * 0.66); // Y=118
+  const groundY = 104;
 
   // 1. Parallax Pixel Clouds
   for (const cl of clouds) {
-    cl.x -= cl.speed * (1 + bass * 0.8);
+    cl.x -= cl.speed;
     if (cl.x + cl.w < 0) cl.x = W + 12;
     const cx = Math.floor(cl.x);
     const cy = Math.floor(cl.y);
@@ -279,29 +279,21 @@ function renderSideScrollerStage(pal, bass, mid, treble) {
     ctx.fillRect(cx + 4, cy, cl.w - 8, 3);
   }
 
-  // 2. Compact Winamp-style Mini LED Equalizer across the upper sky
-  for (let b = 0; b < NUM_SPECTRUM_BARS; b++) {
-    const val = getBarValue(b, bass);
-    const h = Math.max(2, Math.floor(val * 18));
-    ctx.fillStyle = b % 2 === 0 ? pal.accent_neon : pal.pixel_highlight;
-    ctx.fillRect(b * 10 + 2, groundY - h, 6, h);
-  }
-
-  // 3. Parallax Rounded Retro Platformer Hills & Bushes
+  // 2. Parallax Rounded Retro Platformer Hills & Bushes
   const hillScroll = Math.floor(stageScrollX * 0.65);
   ctx.fillStyle = pal.bg_secondary;
   for (let x = 0; x < W; x += 4) {
     const wx = x + hillScroll;
-    const hillH = Math.floor(12 + Math.max(0, Math.sin(wx * 0.035) * 18) + smoothBass * 4);
+    const hillH = Math.floor(12 + Math.max(0, Math.sin(wx * 0.035) * 16));
     ctx.fillRect(x, groundY - hillH, 4, hillH);
   }
 
-  // 4. Floating Retro Brick / Note Platforms that bounce gently on bass hits
+  // 3. Floating Retro Brick / Note Platforms
   const platScroll = (stageScrollX * 1.1) % 110;
-  const bassBump = -Math.round(smoothBass * 3);
+  const bassBump = -Math.round(smoothBass * 2);
   for (let p = 0; p < 4; p++) {
     const px = Math.floor(W - ((p * 110 + platScroll) % (W + 60)) - 20);
-    const py = groundY - 38 - (p % 2) * 14 + bassBump;
+    const py = groundY - 36 - (p % 2) * 12 + bassBump;
     // Draw 3 connected 10x10 retro blocks
     for (let blk = 0; blk < 3; blk++) {
       const bx = px + blk * 10;
@@ -318,7 +310,7 @@ function renderSideScrollerStage(pal, bass, mid, treble) {
     }
   }
 
-  // 5. Scrolling Side-Scroller Ground (Top Turf + Checkered Brick Tiles)
+  // 4. Scrolling Side-Scroller Ground (Top Turf + Checkered Brick Tiles)
   ctx.fillStyle = pal.accent_neon;
   ctx.fillRect(0, groundY, W, 3);
   ctx.fillStyle = pal.pixel_highlight;
@@ -945,7 +937,7 @@ function renderArcadeCanvas() {
   smoothBass += (bass - smoothBass) * 0.07;
   smoothMid += (mid - smoothMid) * 0.07;
   smoothTreble += (treble - smoothTreble) * 0.07;
-  stageScrollX += 0.35 + smoothBass * 0.28;
+  stageScrollX += 0.32 + smoothBass * 0.08;
   const pal = (currentScene && currentScene.palette) ? currentScene.palette : {
     bg_primary: "#090518",
     bg_secondary: "#1d1138",
@@ -963,6 +955,12 @@ function renderArcadeCanvas() {
   // Clear primary background
   ctx.fillStyle = pal.bg_primary;
   ctx.fillRect(0, 0, W, H);
+
+  // When Karaoke Mode is active, the main stage panel plays the YouTube lyric video instead of animated sprites
+  if (window.karaokeModeActive) {
+    requestAnimationFrame(renderArcadeCanvas);
+    return;
+  }
 
   const sprites = (currentScene && Array.isArray(currentScene.sprites) && currentScene.sprites.length > 0)
     ? currentScene.sprites
@@ -1002,6 +1000,8 @@ function renderArcadeCanvas() {
   // Render AI-Generated Custom 8-Bit Sprites adapted to the active stage!
   for (let i = 0; i < spriteActors.length; i++) {
     if (sprites.length === 0) break;
+    // In Side-Scroller & Castle modes, render one instance per unique sprite (max 4) so duplicates never pair up
+    if ((activeStyle === 'side_scroller' || activeStyle === 'dungeon_castle') && i >= Math.min(4, sprites.length)) break;
     // In JRPG Boss Battle mode, keep a clean 1 Giant Boss + 3 Party Heroes formation
     if (activeStyle === 'jrpg_battle' && i >= 4) break;
     // In Space Shmup mode, keep 1 Hero Ship + 6 Galaga Wave Enemies
@@ -1155,40 +1155,40 @@ function renderArcadeCanvas() {
     } else if (activeStyle === 'dungeon_castle' && behavior !== 'rain') {
       if (behavior === 'float' || behavior === 'starfield') {
         // Castlevania Medusa-head / bat sine-wave flight across upper gothic arches
-        actor.x -= (0.65 + smoothBass * 0.4);
+        actor.x -= 0.45;
         if (actor.x < -32) actor.x = 180;
         drawX = actor.x;
-        drawY = 34 + Math.sin(frameTick * 0.06 + i * 1.5) * 12;
+        drawY = 34 + Math.sin(frameTick * 0.04 + i * 1.5) * 10;
         flipX = true;
       } else {
         // Heroes & monsters patrolling and leaping across the stone castle bridge (kept inside open viewport)
         const spanW = 142;
-        const patrolWave = ((frameTick * 0.65 + i * 38) % (spanW * 2));
+        const patrolWave = ((frameTick * 0.35 + i * 48) % (spanW * 2));
         const goingLeft = patrolWave > spanW;
         drawX = 12 + (goingLeft ? (spanW * 2 - patrolWave) : patrolWave);
-        const jumpArc = Math.floor(Math.abs(Math.sin(frameTick * 0.048 + i * 1.4)) * (8 + smoothBass * 10));
+        const jumpArc = Math.floor(Math.abs(Math.sin(frameTick * 0.032 + i * 1.4)) * 8);
         drawY = (horizonY - 32) - jumpArc;
         flipX = goingLeft;
       }
     } else if (activeStyle === 'side_scroller' && (behavior === 'dancers' || behavior === 'scroll' || behavior === 'bounce')) {
-      // In Side-Scroller mode, characters run and jump in a cleanly spaced formation without overlapping
-      drawX = ((frameTick * (0.48 + smoothBass * 0.15) + i * 72) % 216) - 24;
-      const jumpArc = Math.floor(Math.abs(Math.sin(frameTick * 0.045 + i * 1.6)) * (8 + smoothBass * 10));
+      // In Side-Scroller mode, characters run and jump at a steady, relaxed pace with even spacing
+      drawX = ((frameTick * 0.32 + i * 56) % 224) - 28;
+      const jumpArc = Math.floor(Math.abs(Math.sin(frameTick * 0.032 + i * 1.4)) * 9);
       drawY = (horizonY - 32) - jumpArc;
       flipX = false;
     } else if (behavior === 'bounce') {
-      actor.x += actor.vx * (0.55 + smoothBass * 0.35);
+      actor.x += actor.vx * 0.45;
       if (actor.x < 12 || actor.x > W - 44) actor.vx *= -1;
       drawX = actor.x;
-      drawY = (horizonY - 38) - Math.abs(Math.sin(frameTick * 0.045 + actor.phase)) * (12 + smoothBass * 10);
+      drawY = (horizonY - 38) - Math.abs(Math.sin(frameTick * 0.035 + actor.phase)) * 10;
       flipX = actor.vx < 0;
     } else if (behavior === 'scroll') {
-      actor.x -= (0.6 + smoothBass * 0.45);
+      actor.x -= 0.48;
       if (actor.x < -36) actor.x = W + 20;
       drawX = actor.x;
-      drawY = horizonY - 26 + Math.sin(frameTick * 0.05 + actor.phase) * 2.5;
+      drawY = horizonY - 26 + Math.sin(frameTick * 0.04 + actor.phase) * 2.5;
     } else if (behavior === 'rain') {
-      actor.y += (0.55 + smoothTreble * 0.65);
+      actor.y += 0.55;
       if (actor.y > H - 20) {
         actor.y = -24;
         actor.x = (actor.x + 53) % (W - 32);
@@ -1197,13 +1197,13 @@ function renderArcadeCanvas() {
       drawY = actor.y;
     } else if (behavior === 'dancers') {
       drawX = 28 + i * 36;
-      const jump = Math.floor(Math.abs(Math.sin(frameTick * 0.055 + i)) * (6 + smoothBass * 8));
+      const jump = Math.floor(Math.abs(Math.sin(frameTick * 0.04 + i)) * 7);
       drawY = horizonY - 28 - jump;
-      flipX = Math.floor(frameTick / 32 + i) % 2 === 0;
+      flipX = Math.floor(frameTick / 36 + i) % 2 === 0;
     } else {
       // 'float' or 'starfield'
-      drawX = actor.x + Math.sin(frameTick * 0.025 + actor.phase) * 14;
-      drawY = 20 + (i * 16) % Math.max(24, horizonY - 45) + Math.cos(frameTick * 0.03 + actor.phase) * (6 + smoothMid * 6);
+      drawX = 24 + (i * 44) % 140 + Math.sin(frameTick * 0.022 + actor.phase) * 10;
+      drawY = 24 + (i * 18) % Math.max(24, horizonY - 52) + Math.cos(frameTick * 0.026 + actor.phase) * 5;
     }
 
     drawPixelMatrix(spriteDef.matrix, drawX, drawY, scale, colorLookup, flipX);

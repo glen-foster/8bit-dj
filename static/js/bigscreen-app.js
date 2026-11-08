@@ -50,6 +50,26 @@ function renderHUD(state) {
     setMasterVolumePct(state.system_volume);
   }
 
+  // Karaoke Mode vs 8-Bit Sprite Stage + Dual-Deck Audio
+  const isKaraoke = !!state.karaoke_mode;
+  const karaokePanel = document.getElementById('karaokeStagePanel');
+  const spriteSpacer = document.getElementById('spriteStageSpacer');
+  if (window.karaokeModeActive !== isKaraoke) {
+    window.karaokeModeActive = isKaraoke;
+    if (isKaraoke) {
+      if (karaokePanel) karaokePanel.classList.remove('hidden');
+      if (spriteSpacer) spriteSpacer.classList.add('hidden');
+      document.getElementById('audioUnlockBanner').classList.add('hidden');
+      deckAEl.pause();
+      deckBEl.pause();
+    } else {
+      if (karaokePanel) karaokePanel.classList.add('hidden');
+      if (spriteSpacer) spriteSpacer.classList.remove('hidden');
+      stopKaraokePlayer();
+      activeVideoId = null;
+    }
+  }
+
   // Now Playing
   const np = state.now_playing;
   if (np) {
@@ -57,8 +77,6 @@ function renderHUD(state) {
     document.getElementById('nowPlayingArtist').textContent = np.artist;
     document.getElementById('nowPlayingSeedBadge').textContent =
       np.is_seed ? "AUTO-DJ" : `DJ: ${np.requested_by_name}`;
-    document.getElementById('bufferStatusBadge').textContent =
-      np.audio_ready ? "[R128 READY]" : "[BUFFERING]";
 
     if (np.scene) {
       currentScene = np.scene;
@@ -66,21 +84,29 @@ function renderHUD(state) {
       updateStageHeader();
     }
 
-    const { currentEl } = getDeckElements();
-    if (activeVideoId !== np.video_id && !isCrossfading) {
-      loadAndPlayOnActiveDeck(np);
-    } else if (
-      !isCrossfading &&
-      np.audio_ready &&
-      (!activeTrackAudioReady || currentEl.error || (currentEl.paused && currentEl.readyState < 2))
-    ) {
-      // Track finished normalizing in the background while deck was waiting -> reload & start playback immediately!
-      loadAndPlayOnActiveDeck(np, true);
+    if (window.karaokeModeActive) {
+      document.getElementById('bufferStatusBadge').textContent = "[NO-DL STREAM]";
+      loadAndPlayKaraokeTrack(np);
+    } else {
+      document.getElementById('bufferStatusBadge').textContent =
+        np.audio_ready ? "[R128 READY]" : "[BUFFERING]";
+
+      const { currentEl } = getDeckElements();
+      if (activeVideoId !== np.video_id && !isCrossfading) {
+        loadAndPlayOnActiveDeck(np);
+      } else if (
+        !isCrossfading &&
+        np.audio_ready &&
+        (!activeTrackAudioReady || currentEl.error || (currentEl.paused && currentEl.readyState < 2))
+      ) {
+        // Track finished normalizing in the background while deck was waiting -> reload & start playback immediately!
+        loadAndPlayOnActiveDeck(np, true);
+      }
     }
   }
 
-  // Preload Next Up Track onto the inactive deck
-  if (state.next_up_track) {
+  // Preload Next Up Track onto the inactive deck (only when not in Karaoke Mode)
+  if (!window.karaokeModeActive && state.next_up_track) {
     preloadNextDeck(state.next_up_track);
   }
 
@@ -88,7 +114,10 @@ function renderHUD(state) {
   const partyMode = state.party_mode || 'free_for_all';
   const modeHudBadge = document.getElementById('partyModeHudBadge');
   if (modeHudBadge) {
-    if (partyMode === 'host_approval') {
+    if (isKaraoke) {
+      modeHudBadge.textContent = 'KARAOKE MODE';
+      modeHudBadge.className = 'px-2 py-0.5 bg-pink-600/30 border border-pink-500 text-pink-300 text-[9px] xl:text-[10px] cursor-pointer';
+    } else if (partyMode === 'host_approval') {
       modeHudBadge.textContent = 'PUB / APPROVAL';
       modeHudBadge.className = 'px-2 py-0.5 bg-amber-400/20 border border-amber-400 text-amber-300 text-[9px] xl:text-[10px] cursor-pointer';
     } else {
@@ -194,12 +223,39 @@ function handleHostTransportControl(msg) {
     setMasterVolumePct(msg.volume_pct);
     return;
   }
+  const control = msg.control;
+  const delta = Number(msg.seconds || 15);
+
+  if (window.karaokeModeActive) {
+    if (control === 'toggle_pause') {
+      if (karaokeIsPaused) {
+        karaokeIsPaused = false;
+        sendKaraokeCommand('playVideo', []);
+        document.getElementById('activeDeckBadge').textContent = 'KARAOKE [YT LIVE]';
+      } else {
+        karaokeIsPaused = true;
+        sendKaraokeCommand('pauseVideo', []);
+        document.getElementById('activeDeckBadge').textContent = 'KARAOKE [PAUSED]';
+      }
+    } else if (control === 'seek_ff') {
+      const target = karaokeDurTime > 0 ? Math.min(karaokeDurTime - 1, karaokeCurTime + delta) : karaokeCurTime + delta;
+      karaokeCurTime = target;
+      sendKaraokeCommand('seekTo', [target, true]);
+    } else if (control === 'seek_rw') {
+      const target = Math.max(0, karaokeCurTime - delta);
+      karaokeCurTime = target;
+      sendKaraokeCommand('seekTo', [target, true]);
+    } else if (control === 'restart_track') {
+      karaokeCurTime = 0;
+      sendKaraokeCommand('seekTo', [0, true]);
+      sendKaraokeCommand('playVideo', []);
+    }
+    return;
+  }
+
   ensureAudioUnlocked();
   const { currentEl } = getDeckElements();
   if (!currentEl) return;
-
-  const control = msg.control;
-  const delta = Number(msg.seconds || 15);
 
   if (control === 'toggle_pause') {
     if (currentEl.paused) {
@@ -258,6 +314,16 @@ window.addEventListener('message', (e) => {
   }
 });
 
+async function toggleKaraokeFromBigscreen() {
+  try {
+    await fetch('/api/host/action', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pin: '', action: 'toggle_karaoke_mode' })
+    });
+  } catch (err) {}
+}
+
 document.addEventListener('keydown', (e) => {
   ensureAudioUnlocked();
   if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
@@ -267,6 +333,8 @@ document.addEventListener('keydown', (e) => {
     toggleHostModal();
   } else if (e.key === 'v' || e.key === 'V') {
     cycleVizMode();
+  } else if (e.key === 'k' || e.key === 'K') {
+    toggleKaraokeFromBigscreen();
   }
 });
 

@@ -54,11 +54,53 @@ let isCrossfading = false;
 let crossfadeTimer = null;
 let advanceRequestedForId = null;
 
+// Karaoke Mode (Zero-Download YouTube IFrame Lyric Video Player)
+window.karaokeModeActive = false;
+let activeKaraokeTrackId = null;
+let activeKaraokeYtId = null;
+let inflightKaraokeResolveId = null;
+let currentKaraokeTrackObj = null;
+let karaokeFailedMap = {}; // { [queueVideoId]: Set<ytVideoId> }
+let isAdvancingKaraoke = false;
+let karaokeCurTime = 0;
+let karaokeDurTime = 0;
+let karaokeIsPaused = false;
+
+function sendKaraokeCommand(func, args = []) {
+  const iframe = document.getElementById('karaokeYtIframe');
+  if (!iframe || !iframe.contentWindow) return;
+  try {
+    iframe.contentWindow.postMessage(
+      JSON.stringify({ event: 'command', func: func, args: args }),
+      '*'
+    );
+  } catch (err) {}
+}
+
+function registerKaraokeIframeBridge() {
+  const iframe = document.getElementById('karaokeYtIframe');
+  if (!iframe || !iframe.contentWindow) return;
+  try {
+    iframe.contentWindow.postMessage(
+      JSON.stringify({ event: 'listening', id: 'karaokeYtIframe' }),
+      '*'
+    );
+  } catch (err) {}
+}
+
 function setMasterVolumePct(pct) {
   masterVolumePct = Math.max(0, Math.min(100, Number(pct) ?? 50));
   if (masterGainNode) {
     // OS PipeWire / system mixer handles 0-100% attenuation; keep Web Audio at clean 1.0 unity gain (0.0 when muted)
     masterGainNode.gain.value = masterVolumePct === 0 ? 0.0 : 1.0;
+  }
+  if (window.karaokeModeActive) {
+    if (masterVolumePct === 0) {
+      sendKaraokeCommand('mute', []);
+    } else {
+      sendKaraokeCommand('unMute', []);
+      sendKaraokeCommand('setVolume', [100]);
+    }
   }
 }
 
@@ -184,6 +226,22 @@ function updateGainBars() {
 }
 
 async function triggerSixSecondCrossfade(forcedNextTrack = null, notifyBackendAdvance = true) {
+  if (window.karaokeModeActive) {
+    let target = forcedNextTrack;
+    if (notifyBackendAdvance) {
+      try {
+        const res = await fetch('/api/advance', { method: 'POST' });
+        const data = await res.json();
+        if (data && data.now_playing) target = data.now_playing;
+      } catch (err) {
+        console.error("Failed to advance karaoke track:", err);
+      }
+    }
+    if (target) {
+      await loadAndPlayKaraokeTrack(target, false);
+    }
+    return;
+  }
   if (isCrossfading) return;
   isCrossfading = true;
 
@@ -301,8 +359,195 @@ async function triggerSixSecondCrossfade(forcedNextTrack = null, notifyBackendAd
   }, stepTime);
 }
 
-// Monitor active deck playback progress and trigger 6-second crossfade at T-6s
+// =========================================================================
+// 2B. ZERO-DOWNLOAD YOUTUBE IFRAME KARAOKE PLAYER (DIRECT EMBED + POSTMESSAGE)
+// =========================================================================
+const karaokeIframeEl = document.getElementById('karaokeYtIframe');
+if (karaokeIframeEl) {
+  karaokeIframeEl.addEventListener('load', () => {
+    if (!window.karaokeModeActive) return;
+    const overlay = document.getElementById('karaokeLoadingOverlay');
+    if (overlay) overlay.classList.add('hidden');
+    document.getElementById('activeDeckBadge').textContent = 'KARAOKE [YT LIVE]';
+    document.getElementById('bufferStatusBadge').textContent = '[NO-DL STREAM]';
+    registerKaraokeIframeBridge();
+    setTimeout(() => {
+      registerKaraokeIframeBridge();
+      setMasterVolumePct(masterVolumePct);
+      sendKaraokeCommand('playVideo', []);
+    }, 350);
+  });
+}
+
+window.addEventListener('message', (event) => {
+  if (!window.karaokeModeActive || typeof event.data !== 'string') return;
+  try {
+    const msg = JSON.parse(event.data);
+    if (!msg || !msg.event) return;
+
+    if (msg.event === 'onReady') {
+      registerKaraokeIframeBridge();
+      setMasterVolumePct(masterVolumePct);
+      sendKaraokeCommand('playVideo', []);
+    } else if (msg.event === 'infoDelivery' && msg.info) {
+      if (typeof msg.info.currentTime === 'number') {
+        karaokeCurTime = msg.info.currentTime;
+      }
+      if (typeof msg.info.duration === 'number' && msg.info.duration > 0) {
+        karaokeDurTime = msg.info.duration;
+      }
+      if (typeof msg.info.playerState === 'number') {
+        handleKaraokePlayerState(msg.info.playerState);
+      }
+    } else if (msg.event === 'onStateChange' && typeof msg.info === 'number') {
+      handleKaraokePlayerState(msg.info);
+    } else if (msg.event === 'onError' && currentKaraokeTrackObj) {
+      console.warn('Karaoke YT Iframe error:', msg.info, 'for video:', activeKaraokeYtId);
+      const qVid = currentKaraokeTrackObj.video_id;
+      if (!karaokeFailedMap[qVid]) karaokeFailedMap[qVid] = new Set();
+      if (activeKaraokeYtId) karaokeFailedMap[qVid].add(activeKaraokeYtId);
+      if (karaokeFailedMap[qVid].size <= 4) {
+        loadAndPlayKaraokeTrack(currentKaraokeTrackObj, true);
+      } else {
+        advanceKaraokeTrack();
+      }
+    }
+  } catch (err) {}
+});
+
+function handleKaraokePlayerState(stateCode) {
+  const overlay = document.getElementById('karaokeLoadingOverlay');
+  if (stateCode === 1) {
+    // PLAYING
+    karaokeIsPaused = false;
+    if (overlay) overlay.classList.add('hidden');
+    document.getElementById('activeDeckBadge').textContent = 'KARAOKE [YT LIVE]';
+    document.getElementById('bufferStatusBadge').textContent = '[NO-DL STREAM]';
+  } else if (stateCode === 2) {
+    // PAUSED
+    karaokeIsPaused = true;
+    document.getElementById('activeDeckBadge').textContent = 'KARAOKE [PAUSED]';
+  } else if (stateCode === 0) {
+    // ENDED
+    advanceKaraokeTrack();
+  }
+}
+
+async function loadAndPlayKaraokeTrack(track, forceReload = false) {
+  if (!track || !track.video_id) return;
+  currentKaraokeTrackObj = track;
+
+  // Pause HTML5 dual-deck audio elements so only the karaoke video plays
+  if (crossfadeTimer) {
+    clearInterval(crossfadeTimer);
+    crossfadeTimer = null;
+  }
+  isCrossfading = false;
+  deckAEl.pause();
+  deckBEl.pause();
+
+  if (track.scene) {
+    currentScene = track.scene;
+    applyPalette(currentScene.palette);
+    updateStageHeader();
+  }
+
+  const singerBadge = document.getElementById('karaokeSingerBadge');
+  if (singerBadge) {
+    singerBadge.textContent = track.is_seed ? 'MIC: AUTO-DJ' : `MIC: ${track.requested_by_name}`;
+  }
+
+  if (!forceReload && ((activeKaraokeTrackId === track.video_id && activeKaraokeYtId) || inflightKaraokeResolveId === track.video_id)) {
+    return;
+  }
+  activeKaraokeTrackId = track.video_id;
+  inflightKaraokeResolveId = track.video_id;
+  karaokeCurTime = 0;
+  karaokeDurTime = Number(track.duration || 210);
+  karaokeIsPaused = false;
+
+  const overlay = document.getElementById('karaokeLoadingOverlay');
+  if (overlay) overlay.classList.remove('hidden');
+  document.getElementById('activeDeckBadge').textContent = 'KARAOKE [LOADING]';
+  document.getElementById('bufferStatusBadge').textContent = '[NO-DL STREAM]';
+
+  const failedSet = karaokeFailedMap[track.video_id] || new Set();
+  const excludeStr = Array.from(failedSet).join(',');
+  let resolvedYtId = track.video_id;
+  try {
+    const url = `/api/karaoke/resolve?video_id=${encodeURIComponent(track.video_id)}&title=${encodeURIComponent(track.title || '')}&artist=${encodeURIComponent(track.artist || '')}&exclude=${encodeURIComponent(excludeStr)}`;
+    const res = await fetch(url);
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.karaoke_video_id) {
+        resolvedYtId = data.karaoke_video_id;
+      }
+    }
+  } catch (err) {
+    console.warn('Karaoke resolve fallback:', err);
+  } finally {
+    if (inflightKaraokeResolveId === track.video_id) {
+      inflightKaraokeResolveId = null;
+    }
+  }
+
+  if (!window.karaokeModeActive || activeKaraokeTrackId !== track.video_id) return;
+  activeKaraokeYtId = resolvedYtId;
+
+  const iframe = document.getElementById('karaokeYtIframe');
+  if (iframe) {
+    const embedUrl = `https://www.youtube.com/embed/${encodeURIComponent(resolvedYtId)}?autoplay=1&enablejsapi=1&playsinline=1&rel=0&modestbranding=1&iv_load_policy=3&origin=${encodeURIComponent(location.origin)}`;
+    if (iframe.src !== embedUrl) {
+      iframe.src = embedUrl;
+    } else {
+      sendKaraokeCommand('seekTo', [0, true]);
+      sendKaraokeCommand('playVideo', []);
+      if (overlay) overlay.classList.add('hidden');
+    }
+  }
+}
+
+function stopKaraokePlayer() {
+  activeKaraokeTrackId = null;
+  activeKaraokeYtId = null;
+  inflightKaraokeResolveId = null;
+  karaokeCurTime = 0;
+  karaokeDurTime = 0;
+  const iframe = document.getElementById('karaokeYtIframe');
+  if (iframe) {
+    iframe.src = 'about:blank';
+  }
+}
+
+async function advanceKaraokeTrack() {
+  if (isAdvancingKaraoke) return;
+  isAdvancingKaraoke = true;
+  try {
+    const res = await fetch('/api/advance', { method: 'POST' });
+    const data = await res.json();
+    if (data && data.now_playing && window.karaokeModeActive) {
+      await loadAndPlayKaraokeTrack(data.now_playing, false);
+    }
+  } catch (err) {
+    console.error('Failed to advance after karaoke track ended:', err);
+  } finally {
+    isAdvancingKaraoke = false;
+  }
+}
+
+// Monitor active deck playback progress and trigger 6-second crossfade at T-6s (or Karaoke progress)
 setInterval(() => {
+  if (window.karaokeModeActive) {
+    registerKaraokeIframeBridge();
+    if (karaokeDurTime > 0) {
+      const pct = Math.min(100, (karaokeCurTime / karaokeDurTime) * 100);
+      document.getElementById('timeElapsed').textContent = formatTime(karaokeCurTime);
+      document.getElementById('timeTotal').textContent = formatTime(karaokeDurTime);
+      document.getElementById('progressBarFill').style.width = `${pct.toFixed(1)}%`;
+    }
+    return;
+  }
+
   const { currentEl } = getDeckElements();
   if (!currentEl || currentEl.paused || !currentEl.duration || isNaN(currentEl.duration)) return;
 
@@ -321,8 +566,8 @@ setInterval(() => {
 }, 200);
 
 deckAEl.addEventListener('ended', () => {
-  if (activeDeck === 'A' && !isCrossfading) triggerSixSecondCrossfade(null, true);
+  if (!window.karaokeModeActive && activeDeck === 'A' && !isCrossfading) triggerSixSecondCrossfade(null, true);
 });
 deckBEl.addEventListener('ended', () => {
-  if (activeDeck === 'B' && !isCrossfading) triggerSixSecondCrossfade(null, true);
+  if (!window.karaokeModeActive && activeDeck === 'B' && !isCrossfading) triggerSixSecondCrossfade(null, true);
 });

@@ -64,12 +64,16 @@ function renderMobileState(state) {
     userVotes = state.user_votes;
   }
 
-  // Update Party Mode Badge & Open Search Description
+  // Update Party Mode / Karaoke Mode Badge & Open Search Description
   const partyMode = state.party_mode || 'free_for_all';
+  const karaokeMode = !!state.karaoke_mode;
   const modeBadge = document.getElementById('mobilePartyModeBadge');
   const openDesc = document.getElementById('openSearchDesc');
   if (modeBadge) {
-    if (partyMode === 'host_approval') {
+    if (karaokeMode) {
+      modeBadge.textContent = 'KARAOKE MODE';
+      modeBadge.className = 'px-1.5 py-0.5 bg-pink-600 text-white text-[7px] shrink-0';
+    } else if (partyMode === 'host_approval') {
       modeBadge.textContent = 'HOST APPROVAL';
       modeBadge.className = 'px-1.5 py-0.5 bg-amber-400 text-black text-[7px] shrink-0';
     } else {
@@ -78,10 +82,17 @@ function renderMobileState(state) {
     }
   }
   if (openDesc) {
-    openDesc.textContent =
-      partyMode === 'host_approval'
-        ? 'PUB / MODERATED MODE: SEARCH ANY SONG OR PASTE A SPOTIFY LINK. REQUESTS GO TO THE HOST FOR 1-TAP APPROVAL!'
-        : 'FREE-FOR-ALL PARTY MODE: SEARCH ANY SONG OR PASTE A SPOTIFY LINK TO DROP IT STRAIGHT INTO THE LIVE QUEUE!';
+    if (karaokeMode) {
+      openDesc.textContent =
+        partyMode === 'host_approval'
+          ? 'KARAOKE MODE (MODERATED): SEARCH ANY SONG TO FIND YOUTUBE KARAOKE LYRIC VIDEOS!'
+          : 'KARAOKE MODE (FREE-FOR-ALL): SEARCH ANY SONG TO DROP YOUTUBE KARAOKE LYRIC VIDEOS STRAIGHT INTO THE QUEUE!';
+    } else {
+      openDesc.textContent =
+        partyMode === 'host_approval'
+          ? 'PUB / MODERATED MODE: SEARCH ANY SONG OR PASTE A SPOTIFY LINK. REQUESTS GO TO THE HOST FOR 1-TAP APPROVAL!'
+          : 'FREE-FOR-ALL PARTY MODE: SEARCH ANY SONG OR PASTE A SPOTIFY LINK TO DROP IT STRAIGHT INTO THE LIVE QUEUE!';
+    }
   }
 
   const np = state.now_playing;
@@ -320,11 +331,14 @@ async function submitOpenSearch(e) {
   e.preventDefault();
   const q = document.getElementById('searchInput').value.trim();
   if (!q) return;
+  const isKaraoke = !!(latestState && latestState.karaoke_mode);
   const container = document.getElementById('searchResultsList');
-  container.innerHTML = `<div class="text-center text-[9px] text-[#00f5d4] py-6">SEARCHING YOUTUBE MUSIC...</div>`;
+  container.innerHTML = `<div class="text-center text-[9px] text-[#00f5d4] py-6">${
+    isKaraoke ? 'SEARCHING KARAOKE LYRIC VIDEOS...' : 'SEARCHING YOUTUBE MUSIC...'
+  }</div>`;
 
   try {
-    const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
+    const res = await fetch(`/api/search?q=${encodeURIComponent(q)}&karaoke=${isKaraoke ? 1 : 0}`);
     const data = await res.json();
     const results = data.results || [];
     lastSearchResults = results;

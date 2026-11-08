@@ -97,25 +97,40 @@ function renderHostState(state) {
       (np.scene && np.scene.stage_title) ? np.scene.stage_title : 'STAGE 01';
   }
 
-  // Sync Party Mode Buttons & Hint
+  // Sync Party Mode & Karaoke Mode Buttons & Hint
   const partyMode = state.party_mode || 'free_for_all';
+  const karaokeMode = !!state.karaoke_mode;
   const btnFree = document.getElementById('partyModeBtnFree');
   const btnApproval = document.getElementById('partyModeBtnApproval');
+  const btnKaraoke = document.getElementById('karaokeModeBtn');
   const modeHint = document.getElementById('hostPartyModeHint');
+  if (btnKaraoke) {
+    if (karaokeMode) {
+      btnKaraoke.textContent = 'KARAOKE VIDEO MODE: ON';
+      btnKaraoke.className = 'arcade-btn px-2.5 py-1 bg-pink-600 text-white text-[7px]';
+    } else {
+      btnKaraoke.textContent = 'KARAOKE VIDEO MODE: OFF';
+      btnKaraoke.className = 'arcade-btn px-2.5 py-1 bg-[#1b113a] text-pink-400 text-[7px]';
+    }
+  }
   if (btnFree && btnApproval) {
     if (partyMode === 'host_approval') {
       btnApproval.className = 'arcade-btn px-2.5 py-1 bg-amber-400 text-black text-[7px]';
       btnFree.className = 'arcade-btn px-2.5 py-1 bg-[#1b113a] text-[#00f5d4] text-[7px]';
       if (modeHint) {
-        modeHint.textContent = 'PUB / MODERATED MODE: OPEN SEARCH REQUESTS REQUIRE HOST APPROVAL';
+        modeHint.textContent = karaokeMode
+          ? 'KARAOKE + PUB MODE: YOUTUBE LYRIC VIDEOS STREAM DIRECTLY (MODERATION ON)'
+          : 'PUB / MODERATED MODE: OPEN SEARCH REQUESTS REQUIRE HOST APPROVAL';
         modeHint.className = 'text-[7px] text-amber-300';
       }
     } else {
       btnFree.className = 'arcade-btn px-2.5 py-1 bg-emerald-400 text-black text-[7px]';
       btnApproval.className = 'arcade-btn px-2.5 py-1 bg-[#1b113a] text-amber-300 text-[7px]';
       if (modeHint) {
-        modeHint.textContent = 'GUEST SEARCHES DROP STRAIGHT INTO LIVE QUEUE (UP/DOWN VOTING ACTIVE)';
-        modeHint.className = 'text-[7px] text-emerald-300';
+        modeHint.textContent = karaokeMode
+          ? 'KARAOKE MODE ACTIVE: YOUTUBE LYRIC VIDEOS STREAM DIRECTLY (ZERO DOWNLOAD)'
+          : 'GUEST SEARCHES DROP STRAIGHT INTO LIVE QUEUE (UP/DOWN VOTING ACTIVE)';
+        modeHint.className = karaokeMode ? 'text-[7px] text-pink-400' : 'text-[7px] text-emerald-300';
       }
     }
   }
@@ -300,6 +315,10 @@ async function setHostVizMode(modeId, label) {
 async function setHostPartyMode(mode) {
   const target = mode === 'host_approval' ? 'host_approval' : 'free_for_all';
   await sendTransportControl(`set_party_mode:${target}`, 0);
+}
+
+async function toggleHostKaraokeMode() {
+  await sendTransportControl('toggle_karaoke_mode', 0);
 }
 
 function onVolumeSliderInput(val) {

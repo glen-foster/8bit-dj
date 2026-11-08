@@ -42,6 +42,11 @@ Guests scan a QR code on the TV to join from their phones (over 5G/LTE or Wi-Fi�
   - **Auto-DJ Seed Pool (YouTube Music & Spotify)**: Automatically keeps at least 5 tracks in the queue from your chosen **YouTube Music** or **Spotify** seed playlist so the party never hits dead air.
   - **Zero-Account Spotify Support**: Load any public **Spotify Playlist** (`open.spotify.com/playlist/...`) or **Spotify Track** (`open.spotify.com/track/...`)—or pick from 15+ built-in official Spotify playlists (*All Out 80s*, *All Out 90s*, *Rock Classics*, *Disco Forever*, etc.)—with **no Spotify account or API key required**.
 
+- **Zero-Download Karaoke Video Mode**:
+  - **YouTube Lyric Video Stage**: Toggle `[ KARAOKE VIDEO MODE: ON ]` in the Host Console to replace the animated 8-bit sprites in the main left-hand TV panel with an embedded YouTube lyric video monitor.
+  - **Zero Pre-fetch / Zero Normalization Bandwidth**: In Karaoke Mode, background `yt-dlp` / `ffmpeg` downloading is automatically paused and videos stream directly via the YouTube IFrame Player API.
+  - **Automatic Karaoke Video Resolution & Embed Verification**: Mobile Open Search automatically searches for embeddable YouTube karaoke lyric videos, and even existing non-karaoke songs or Seed Pool tracks automatically resolve to their matching karaoke lyric video when Karaoke Mode is turned on.
+
 - **Pocket Arcade Mobile DJ Controller (`/mobile`)**:
   - **Automatic Public HTTPS Tunnel**: Spawns a free outbound SSH reverse tunnel (`localhost.run`) on startup and updates the TV QR code automatically—guests can scan and join over mobile data (5G/LTE) even if they aren't on the venue's Wi-Fi.
   - **Two Party Modes (Switchable Live by Host)**:
@@ -130,7 +135,8 @@ Then open:
 | Key / Action | Description |
 | :--- | :--- |
 | **`H`** or **Click QR Code Box** | Open / Close the Host Admin Console popup |
-| **`V`** | Cycle through the 6 retro visualizer stages (`AUTO`, `SCROLL`, `BRAWL`, `LED`, `FIRE`, `CITY`, `GRID`) |
+| **`K`** | Toggle Karaoke Video Mode (`ON` / `OFF`) |
+| **`V`** | Cycle through the 9 retro visualizer stages (`AUTO`, `SCROLL`, `BRAWL`, `SHMUP`, `JRPG`, `CASTLE`, `LED`, `FIRE`, `CITY`, `GRID`) |
 | **`F11`** | Toggle Full-Screen / Windowed mode (on Raspberry Pi / Desktop) |
 | **`Esc`** | Close the Host Admin Console popup |
 

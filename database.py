@@ -178,6 +178,9 @@ def init_db() -> None:
         conn.execute(
             "INSERT OR IGNORE INTO settings (key, value) VALUES ('party_mode', 'free_for_all')"
         )
+        conn.execute(
+            "INSERT OR IGNORE INTO settings (key, value) VALUES ('karaoke_mode', '0')"
+        )
 
         # Recover from abrupt reboot: if more than one track is 'playing', keep only the latest
         playing_rows = conn.execute(
@@ -563,6 +566,23 @@ def set_party_mode(mode: str) -> str:
     if normalized == "free_for_all":
         approve_all_pending_requests()
     return normalized
+
+
+def get_karaoke_mode() -> bool:
+    """
+    Returns True when Karaoke Mode is enabled:
+    - Big Screen plays YouTube karaoke lyric videos directly in the main stage panel
+      instead of showing the animated 8-bit sprites.
+    - Background audio downloading/normalization is skipped to save bandwidth.
+    """
+    val = get_setting("karaoke_mode", "0").strip().lower()
+    return val in ("1", "true", "on", "yes")
+
+
+def set_karaoke_mode(enabled: bool) -> bool:
+    flag = bool(enabled)
+    set_setting("karaoke_mode", "1" if flag else "0")
+    return flag
 
 
 def reject_or_remove_track(queue_id: int) -> bool:

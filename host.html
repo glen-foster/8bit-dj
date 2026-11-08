@@ -243,7 +243,7 @@
         </div>
       </div>
 
-      <!-- Party Mode Bar: Free-For-All (Private Party Default) vs Host Approval (Public / Pub) -->
+      <!-- Party Mode & Karaoke Mode Bar -->
       <div class="pt-2 border-t border-pink-900/60 flex flex-wrap items-center justify-between gap-2">
         <div class="flex flex-wrap items-center gap-1.5">
           <span class="text-[8px] text-amber-300 mr-1">PARTY MODE:</span>
@@ -262,6 +262,15 @@
             class="arcade-btn px-2.5 py-1 bg-[#1b113a] text-amber-300 text-[7px]"
           >
             HOST APPROVAL (PUB / PUBLIC)
+          </button>
+          <span class="text-gray-600 mx-1">|</span>
+          <button
+            id="karaokeModeBtn"
+            type="button"
+            onclick="toggleHostKaraokeMode()"
+            class="arcade-btn px-2.5 py-1 bg-[#1b113a] text-pink-400 text-[7px]"
+          >
+            KARAOKE VIDEO MODE: OFF
           </button>
         </div>
         <div id="hostPartyModeHint" class="text-[7px] text-emerald-300">
@@ -409,6 +418,6 @@
     </section>
   </div>
 
-  <script src="/static/js/host.js"></script>
+  <script src="/static/js/host.js?v=3"></script>
 </body>
 </html>

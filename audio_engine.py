@@ -127,9 +127,87 @@ def _fetch_spotify_embed_entity(entity_type: str, spotify_id: str) -> Optional[D
         return None
 
 
-def search_ytmusic(query: str, limit: int = 12) -> List[Dict[str, Any]]:
+_embeddable_cache: Dict[str, bool] = {}
+_karaoke_vid_cache: Dict[str, str] = {}
+
+
+def _is_youtube_embeddable(video_id: str) -> bool:
     """
-    Searches YouTube Music for songs matching `query` via `ytmusicapi`.
+    Fast check (~50-150ms) via YouTube's public oEmbed endpoint to verify that a video
+    allows external iframe embedding (returns 200 OK; returns 401/403 when the uploader
+    disabled embedding on external sites).
+    """
+    if not video_id:
+        return False
+    if video_id in _embeddable_cache:
+        return _embeddable_cache[video_id]
+    url = f"https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={video_id}&format=json"
+    try:
+        req = urllib.request.Request(url, method="HEAD")
+        with urllib.request.urlopen(req, timeout=2.5) as resp:
+            ok = resp.status == 200
+            _embeddable_cache[video_id] = ok
+            return ok
+    except Exception:
+        _embeddable_cache[video_id] = False
+        return False
+
+
+def resolve_karaoke_video_id(
+    video_id: str,
+    title: str = "",
+    artist: str = "",
+    exclude_ids: Optional[List[str]] = None,
+) -> str:
+    """
+    Resolves a song (`video_id`, `title`, `artist`) to an embeddable YouTube Karaoke Lyric Video ID
+    with zero video downloading required.
+    - If `title` already looks like a karaoke/lyric video and `video_id` is embeddable, returns `video_id`.
+    - Otherwise searches YouTube videos for `"{title} {artist} karaoke"` and picks the best embeddable match.
+    """
+    excluded = set(exclude_ids or [])
+    cache_key = f"{video_id}::{','.join(sorted(excluded))}"
+    if cache_key in _karaoke_vid_cache:
+        return _karaoke_vid_cache[cache_key]
+
+    t_low = (title or "").lower()
+    if ("karaoke" in t_low or "instrumental" in t_low) and video_id not in excluded:
+        if _is_youtube_embeddable(video_id):
+            _karaoke_vid_cache[cache_key] = video_id
+            return video_id
+
+    if _ytmusic is not None and (title or artist):
+        clean_title = re.sub(r"\(.*?\)|\[.*?\]", "", title or "").strip()
+        clean_artist = "" if (artist or "").lower() in ("unknown artist", "8bit_autodj") else (artist or "")
+        q_karaoke = f"{clean_title} {clean_artist} karaoke".strip()
+        try:
+            raw = _ytmusic.search(q_karaoke, filter="videos", limit=14)
+            candidates = [r for r in raw if r.get("videoId") and r.get("videoId") not in excluded]
+            # Prioritize videos with 'karaoke' or 'lyrics' in the title
+            candidates.sort(
+                key=lambda x: (
+                    2 if "karaoke" in (x.get("title") or "").lower()
+                    else (1 if "lyric" in (x.get("title") or "").lower() else 0)
+                ),
+                reverse=True,
+            )
+            with ThreadPoolExecutor(max_workers=8) as pool:
+                checks = list(pool.map(lambda item: _is_youtube_embeddable(item["videoId"]), candidates))
+            for item, ok in zip(candidates, checks):
+                if ok:
+                    chosen_id = item["videoId"]
+                    _karaoke_vid_cache[cache_key] = chosen_id
+                    return chosen_id
+        except Exception as exc:
+            logger.warning(f"Karaoke video resolution warning for '{q_karaoke}': {exc}")
+
+    return video_id
+
+
+def search_ytmusic(query: str, limit: int = 12, karaoke: bool = False) -> List[Dict[str, Any]]:
+    """
+    Searches YouTube Music for songs (or embeddable YouTube Karaoke Lyric Videos when `karaoke=True`)
+    matching `query` via `ytmusicapi`.
     Also supports pasting a public Spotify Track URL/URI (`open.spotify.com/track/...`)
     without requiring a Spotify account.
     """
@@ -149,7 +227,19 @@ def search_ytmusic(query: str, limit: int = 12) -> List[Dict[str, Any]]:
 
     if _ytmusic is not None:
         try:
-            results = _ytmusic.search(q_clean, filter="songs", limit=limit)
+            if karaoke:
+                q_search = q_clean if "karaoke" in q_clean.lower() else f"{q_clean} karaoke"
+                raw_results = _ytmusic.search(q_search, filter="videos", limit=20)
+                with ThreadPoolExecutor(max_workers=8) as pool:
+                    embed_flags = list(
+                        pool.map(lambda r: _is_youtube_embeddable(r.get("videoId", "")), raw_results)
+                    )
+                results = [r for r, ok in zip(raw_results, embed_flags) if ok][:limit]
+                if not results:
+                    results = raw_results[:limit]
+            else:
+                results = _ytmusic.search(q_clean, filter="songs", limit=limit)
+
             parsed: List[Dict[str, Any]] = []
             for item in results:
                 vid = item.get("videoId")
@@ -167,12 +257,13 @@ def search_ytmusic(query: str, limit: int = 12) -> List[Dict[str, Any]]:
                         "artist": artist_name,
                         "duration": duration,
                         "thumbnail": thumb_url,
+                        "is_karaoke": bool(karaoke),
                     }
                 )
             if parsed:
                 return parsed
         except Exception as exc:
-            logger.warning(f"ytmusicapi search error for '{q_clean}': {exc}")
+            logger.warning(f"ytmusicapi search error for '{q_clean}' (karaoke={karaoke}): {exc}")
 
     # Fallback search against local seed pool if offline
     q_low = q_clean.lower()
@@ -701,6 +792,17 @@ class AudioPrefetchEngine:
         logger.info("Audio Pre-fetcher & AI Scene background worker started.")
         while self._running:
             try:
+                # In Karaoke Mode, videos stream directly from YouTube in the browser iframe player
+                # and 8-bit sprites are hidden, so skip both AI scene generation and yt-dlp/ffmpeg downloading!
+                if database.get_karaoke_mode():
+                    try:
+                        await asyncio.wait_for(self._wakeup_event.wait(), timeout=3.0)
+                    except asyncio.TimeoutError:
+                        pass
+                    finally:
+                        self._wakeup_event.clear()
+                    continue
+
                 now_playing = database.get_now_playing()
                 queue = database.get_active_queue()
                 pending = database.get_pending_approvals()

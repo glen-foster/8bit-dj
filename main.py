@@ -380,6 +380,7 @@ def build_full_state(client_id: Optional[str] = None, include_host: bool = False
         "wifi_status": wifi_manager.get_wifi_status(),
         "system_volume": get_system_volume(),
         "party_mode": database.get_party_mode(),
+        "karaoke_mode": database.get_karaoke_mode(),
         "now_playing": enriched_now,
         "next_up_track": next_up_track,
         "queue": queue,
@@ -544,7 +545,12 @@ async def captive_portal_intercept_middleware(request: Request, call_next):
     if not is_local_or_tunnel and not path.startswith("/api/") and not path.startswith("/static/"):
         return RedirectResponse(url=f"http://{wifi_manager.HOTSPOT_IP}:{PORT}/wifi-setup", status_code=302)
 
-    return await call_next(request)
+    response = await call_next(request)
+    if path.startswith("/static/") or path in ("/", "/mobile", "/mobile.html", "/bigscreen", "/bigscreen.html", "/host", "/host.html", "/wifi-setup", "/wifi_setup.html"):
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+    return response
 
 
 # --- Frontend HTML Routes ---
@@ -663,9 +669,31 @@ async def api_user(req: RegisterUserRequest) -> Dict[str, Any]:
 
 # --- Search & Queue API ---
 @app.get("/api/search")
-async def api_search(q: str = Query(..., min_length=1)) -> Dict[str, Any]:
-    results = await asyncio.to_thread(audio_engine.search_ytmusic, q, 12)
-    return {"ok": True, "results": results}
+async def api_search(
+    q: str = Query(..., min_length=1),
+    karaoke: Optional[int] = Query(default=None),
+) -> Dict[str, Any]:
+    use_karaoke = bool(karaoke) if karaoke is not None else database.get_karaoke_mode()
+    results = await asyncio.to_thread(audio_engine.search_ytmusic, q, 12, use_karaoke)
+    return {"ok": True, "karaoke": use_karaoke, "results": results}
+
+
+@app.get("/api/karaoke/resolve")
+async def api_karaoke_resolve(
+    video_id: str = Query(...),
+    title: str = Query(default=""),
+    artist: str = Query(default=""),
+    exclude: str = Query(default=""),
+) -> Dict[str, Any]:
+    exclude_list = [x.strip() for x in exclude.split(",") if x.strip()]
+    resolved_id = await asyncio.to_thread(
+        audio_engine.resolve_karaoke_video_id,
+        video_id,
+        title,
+        artist,
+        exclude_list,
+    )
+    return {"ok": True, "video_id": video_id, "karaoke_video_id": resolved_id}
 
 
 @app.post("/api/request")
@@ -693,13 +721,14 @@ async def api_request_track(req: QueueTrackRequest) -> Dict[str, Any]:
     if prefetch_engine:
         prefetch_engine.trigger_Pass()
 
-    # Check if this track is in Top 3 of queue and trigger async scene generation right away
-    active_q = database.get_active_queue()
-    top3_ids = {t["video_id"] for t in active_q[:3]}
-    if req.video_id in top3_ids:
-        asyncio.create_task(
-            ai_scene_generator.ensure_scene_for_track(req.video_id, req.title, req.artist)
-        )
+    # Check if this track is in Top 3 of queue and trigger async scene generation right away (when not in Karaoke Mode)
+    if not database.get_karaoke_mode():
+        active_q = database.get_active_queue()
+        top3_ids = {t["video_id"] for t in active_q[:3]}
+        if req.video_id in top3_ids:
+            asyncio.create_task(
+                ai_scene_generator.ensure_scene_for_track(req.video_id, req.title, req.artist)
+            )
 
     await broadcast_state()
     return {
@@ -852,6 +881,23 @@ async def api_host_action(req: HostActionRequest, request: Request) -> Dict[str,
             else "HOST APPROVAL (PUBLIC / PUB MODERATED)"
         )
         return {"ok": True, "party_mode": new_mode, "message": f"PARTY MODE SET TO: {label}"}
+
+    elif req.action == "toggle_karaoke_mode" or req.action.startswith("set_karaoke_mode:"):
+        if req.action == "toggle_karaoke_mode":
+            enabled = not database.get_karaoke_mode()
+        else:
+            raw_k = req.action.split(":", 1)[1].strip().lower()
+            enabled = raw_k in ("1", "true", "on", "yes")
+        new_k = database.set_karaoke_mode(enabled)
+        if prefetch_engine:
+            prefetch_engine.trigger_Pass()
+        await broadcast_state()
+        msg = (
+            "KARAOKE MODE ENABLED! PLAYING YOUTUBE LYRIC VIDEOS ON BIG SCREEN (NO DOWNLOADING)."
+            if new_k
+            else "KARAOKE MODE OFF! RESTORED 8-BIT SPRITE STAGES & DUAL-DECK AUDIO."
+        )
+        return {"ok": True, "karaoke_mode": new_k, "message": msg}
 
     elif req.action == "reject" and req.queue_id is not None:
         ok = database.reject_or_remove_track(req.queue_id)
