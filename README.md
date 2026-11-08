@@ -1,20 +1,26 @@
 # 8-Bit Arcade Jukebox (`8bit-dj`)
 
-Turn a **Raspberry Pi 5** (or any Mac / Linux machine) plugged into a TV or projector into an interactive **8-Bit Arcade Party Jukebox**.
+Turn a **Raspberry Pi 5** (or any Mac / Linux machine) plugged into a TV or projector into an interactive **8-Bit Arcade Party Jukebox & Karaoke Machine**.
 
-Guests scan a QR code on the TV to join from their phones (over 5G/LTE or Wi-Fi—no app install required), get a random retro DJ tag, vote on the live queue, or request tracks from YouTube Music while the TV renders 60fps audio-reactive 8-bit stages and custom AI-generated pixel-art sprites.
+Guests scan a QR code on the TV to join from their phones (over 5G/LTE or Wi-Fi—no app install required), get a random retro DJ tag, upvote/downvote the live queue, or drop in songs from YouTube Music & Spotify while the TV renders 60fps audio-reactive 8-bit stages, custom AI-generated pixel-art sprites, or **Zero-Download YouTube Karaoke Lyric Videos**.
 
-[![8-Bit Arcade Jukebox Live Demo](./screenshots/demo.gif)](./screenshots/demo.mp4)
+| 8-Bit Arcade Visualizer Mode (Live Demo) | Zero-Download Karaoke Video Mode (Live Demo) |
+| :---: | :---: |
+| [![8-Bit Arcade Jukebox Live Demo](./screenshots/demo.gif)](./screenshots/demo.mp4) | [![Karaoke Video Mode Live Demo](./screenshots/karaoke-demo.gif)](./screenshots/karaoke-demo.mp4) |
 
 ## Screenshots
 
-| Big Screen — Custom Gemini AI Pixel Art ("Peaches") | Big Screen — Midnight City Skyline Stage |
+| Big Screen — Custom Gemini AI Pixel Art ("Peaches") | Big Screen — Zero-Download Karaoke Lyric Stage |
 | :---: | :---: |
-| ![Big Screen Custom Gemini Pixel Art](./screenshots/bigscreen-peaches.png) | ![Big Screen City Skyline](./screenshots/bigscreen-city-cruiser.png) |
+| ![Big Screen Custom Gemini Pixel Art](./screenshots/bigscreen-peaches.png) | ![Big Screen Karaoke Video Mode](./screenshots/bigscreen-karaoke.png) |
 
-| Big Screen — Side-Scroller Platformer Stage | Host Admin Command Console (`/host`) | Mobile DJ Controller (`/mobile`) |
-| :---: | :---: | :---: |
-| ![Big Screen Side-Scroller](./screenshots/bigscreen-side-scroller.png) | ![Host Admin Command Console](./screenshots/host-admin-console.png) | <img src="./screenshots/mobile-dj-controller.png" alt="Mobile DJ Controller" width="260" /> |
+| Big Screen — Midnight City Skyline Stage | Big Screen — Side-Scroller Platformer Stage |
+| :---: | :---: |
+| ![Big Screen City Skyline](./screenshots/bigscreen-city-cruiser.png) | ![Big Screen Side-Scroller](./screenshots/bigscreen-side-scroller.png) |
+
+| Host Admin Command Console (`/host`) | Mobile DJ Controller (`/mobile`) |
+| :---: | :---: |
+| ![Host Admin Command Console](./screenshots/host-admin-console.png) | <img src="./screenshots/mobile-dj-controller.png" alt="Mobile DJ Controller" width="260" /> |
 
 ---
 
